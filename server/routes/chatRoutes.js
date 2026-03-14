@@ -29,7 +29,8 @@ router.get('/commands', (req, res) => {
       { id: 'context', name: '/context', description: 'Show context window token usage', category: 'session' },
       { id: 'clear', name: '/clear', description: 'Clear conversation and start fresh', category: 'session' },
       { id: 'help', name: '/help', description: 'Show available commands and help', category: 'session' },
-      { id: 'release-notes', name: '/release-notes', description: 'View Claude Code changelog', category: 'session' }
+      { id: 'release-notes', name: '/release-notes', description: 'View Claude Code changelog', category: 'session' },
+      { id: 'refresh-skills', name: '/refresh-skills', description: '🔄 Reload skills from server (force refresh)', category: 'session' }
     ],
     skills: [
       // Superpower workflow
@@ -174,10 +175,55 @@ async function getSkillsFromSSH(serverIp) {
   try {
     console.log(`[SSH Skills] Reading skills from ${serverIp}...`);
 
-    // Read skill directories from remote server
+    // Try using 'claude skills list' first (includes plugin skills)
+    try {
+      const cliOutput = await pool.exec(serverIp,
+        'cd ~/.claude/projects/-home-ubuntu-agent-skill 2>/dev/null && claude skills list 2>&1 || claude skills list 2>&1',
+        { timeout: 10000 }
+      );
+
+      const trimmedCli = cliOutput.trim();
+      console.log(`[SSH Skills] claude CLI output (first 200 chars): ${trimmedCli.substring(0, 200)}`);
+
+      if (trimmedCli && !trimmedCli.includes('command not found') && !trimmedCli.includes('No such file')) {
+        // Parse output: extract skill names from lines like "  skill-name · description"
+        const skillNames = [];
+        const lines = trimmedCli.split('\n');
+
+        for (const line of lines) {
+          // Match lines starting with 2 spaces followed by skill name
+          const match = line.match(/^  ([a-z0-9-]+(?::[a-z0-9-]+)?)/);
+          if (match) {
+            skillNames.push(match[1]);
+          }
+        }
+
+        console.log(`[SSH Skills] Parsed ${skillNames.length} skills from claude CLI output`);
+
+        if (skillNames.length > 0) {
+          const skills = skillNames.map(name => ({
+            id: name,
+            name: `/${name}`,
+            description: `Skill: ${name}`,
+            category: 'skill'
+          }));
+
+          console.log(`[SSH Skills] Found ${skills.length} skills from ${serverIp} (via claude CLI - includes plugins)`);
+          return skills;
+        }
+      }
+      console.log(`[SSH Skills] claude CLI returned no usable skills, falling back to directory scan`);
+    } catch (cliErr) {
+      console.log(`[SSH Skills] claude CLI error: ${cliErr.message}, falling back to directory scan`);
+    }
+
+    // Fallback: Read skill directories from ALL possible locations
+    // 1. User skills: ~/.claude/skills/ (global user skills)
+    // 2. Project skills: /home/ubuntu/.claude/skills/ (absolute)
+    // 3. Project-specific skills: find in common project locations
     const skillDirs = await pool.exec(serverIp,
-      'ls -1 ~/.claude/skills/ 2>/dev/null || echo ""',
-      { timeout: 8000 }
+      '(ls -1 ~/.claude/skills/ 2>/dev/null; ls -1 /home/ubuntu/.claude/skills/ 2>/dev/null; find /home/ubuntu -maxdepth 3 -type d -name skills -path "*/.claude/skills" 2>/dev/null | while read dir; do ls -1 "$dir" 2>/dev/null; done) | sort -u',
+      { timeout: 10000 }
     );
 
     const trimmed = skillDirs.trim();
@@ -187,36 +233,40 @@ async function getSkillsFromSSH(serverIp) {
     }
 
     // Parse directories to skill commands
-    const skills = trimmed.split('\n')
+    const skillNames = trimmed.split('\n')
       .filter(Boolean)
-      .filter(dir => !dir.startsWith('.')) // Skip hidden dirs
-      .map(dirName => {
-        // Convert directory name to command format
-        // Examples:
-        //   "superpower-tdd" → "superpower:tdd"
-        //   "ui-ux-pro-max" → "ui-ux-pro-max" (keep hyphens in middle)
-        //   "opsx-new" → "opsx:new"
+      .filter(dir => !dir.startsWith('.')); // Skip hidden dirs
 
-        let cmdName = dirName;
+    const skills = skillNames.map(dirName => {
+      // Convert directory name to command format
+      // Examples:
+      //   "superpower-tdd" → "superpower:tdd"
+      //   "openspec-new-change" → "openspec-new-change"
+      //   "pua-debugging" → "pua:debugging"
 
-        // Special handling for known patterns
-        if (dirName.startsWith('superpower-')) {
-          cmdName = dirName.replace('superpower-', 'superpower:');
-        } else if (dirName.startsWith('opsx-')) {
-          cmdName = dirName.replace('opsx-', 'opsx:');
-        } else if (dirName.startsWith('pua-')) {
-          cmdName = dirName.replace('pua-', 'pua:');
-        }
+      let cmdName = dirName;
 
-        return {
-          id: cmdName,
-          name: `/${cmdName}`,
-          description: `Skill: ${cmdName}`,
-          category: 'skill'
-        };
-      });
+      // Special handling for known patterns
+      if (dirName.startsWith('superpower-')) {
+        cmdName = dirName.replace('superpower-', 'superpower:');
+      } else if (dirName.startsWith('opsx-')) {
+        cmdName = dirName.replace('opsx-', 'opsx:');
+      } else if (dirName.startsWith('pua-')) {
+        cmdName = dirName.replace('pua-', 'pua:');
+      } else if (dirName.startsWith('openspec-')) {
+        // openspec-new-change stays as /openspec-new-change
+        cmdName = dirName;
+      }
 
-    console.log(`[SSH Skills] Found ${skills.length} skills from ${serverIp}`);
+      return {
+        id: cmdName,
+        name: `/${cmdName}`,
+        description: `Skill: ${cmdName}`,
+        category: 'skill'
+      };
+    });
+
+    console.log(`[SSH Skills] Found ${skills.length} skills from ${serverIp} (user + project combined)`);
 
     // Return dynamic list if found, otherwise fallback to static
     return skills.length > 0 ? skills : getStaticSkills();
@@ -390,14 +440,48 @@ router.get('/sessions/:id/history', (req, res) => {
   res.json({ messages: store.getMessages(req.params.id) });
 });
 
+// GET /api/chat/sessions/:id/context — Get context usage
+router.get('/sessions/:id/context', async (req, res) => {
+  try {
+    const runner = getClaudeRunner();
+    const contextInfo = await runner.getContext(req.params.id);
+
+    if (!contextInfo) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json(contextInfo);
+  } catch (err) {
+    console.error(`[API] Failed to get context for ${req.params.id}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/chat/sessions/:id/compact — Compact context
+router.post('/sessions/:id/compact', async (req, res) => {
+  try {
+    const runner = getClaudeRunner();
+    const result = await runner.compact(req.params.id);
+    res.json(result);
+  } catch (err) {
+    console.error(`[API] Failed to compact ${req.params.id}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/chat/sessions/:id/message — SSE streaming response
 router.post('/sessions/:id/message', async (req, res) => {
-  const { content } = req.body;
+  const { content, mode } = req.body;
   if (!content) return res.status(400).json({ error: 'content is required' });
 
   const store = getChatSessionStore();
   const session = store.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  // Store mode in session for future reference
+  if (mode) {
+    store.update(req.params.id, { mode });
+  }
 
   // Set up SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -408,7 +492,7 @@ router.post('/sessions/:id/message', async (req, res) => {
 
   try {
     const runner = getClaudeRunner();
-    const emitter = await runner.sendMessage(req.params.id, content);
+    const emitter = await runner.sendMessage(req.params.id, content, { mode });
 
     emitter.on('data', (event) => {
       res.write(`event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);

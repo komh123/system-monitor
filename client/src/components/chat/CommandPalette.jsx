@@ -73,8 +73,13 @@ function CommandPalette({ isOpen, onClose, onSelect, commands, mcpTools }) {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (flatList[selectedIndex]) {
-        onSelect(flatList[selectedIndex]);
-        onClose();
+        const item = flatList[selectedIndex];
+        onSelect(item);
+        // Only close palette for non-skill items
+        // Skills stay open for multi-selection
+        if (item.category !== 'skill') {
+          onClose();
+        }
       }
     }
   };
@@ -133,7 +138,13 @@ function CommandPalette({ isOpen, onClose, onSelect, commands, mcpTools }) {
                     <button
                       key={item.id}
                       data-index={idx}
-                      onClick={() => { onSelect(item); onClose(); }}
+                      onClick={() => {
+                        onSelect(item);
+                        // Only close for non-skill items
+                        if (item.category !== 'skill') {
+                          onClose();
+                        }
+                      }}
                       className={`w-full text-left px-3 sm:px-4 py-2.5 sm:py-3 flex items-center gap-3 transition-colors ${
                         idx === selectedIndex
                           ? 'bg-blue-600 text-white'

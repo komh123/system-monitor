@@ -21,6 +21,9 @@ function ChatPage() {
   const [commands, setCommands] = useState([]);
   const [mcpTools, setMcpTools] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedCommand, setSelectedCommand] = useState(null);
+  const [contextUsage, setContextUsage] = useState(0);
+  const [mode, setMode] = useState('ask');
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
 
@@ -101,9 +104,45 @@ function ChatPage() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Refresh skills from server
+  const handleRefreshSkills = async () => {
+    if (!activeSession?.serverIp) return;
+
+    try {
+      const skillData = await fetch(`${API_BASE}/skills?serverIp=${encodeURIComponent(activeSession.serverIp)}`).then(r => r.json());
+
+      setCommands(prev => {
+        const withoutSkills = prev.filter(c => c.category !== 'skill');
+        return [...withoutSkills, ...(skillData.skills || [])];
+      });
+
+      // Add system message
+      const systemMsg = {
+        role: 'assistant',
+        content: `✅ Skills refreshed! Loaded ${skillData.skills?.length || 0} skills from ${activeSession.serverIp}`,
+        timestamp: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, systemMsg]);
+    } catch (err) {
+      console.error('Failed to refresh skills:', err);
+      const errorMsg = {
+        role: 'assistant',
+        content: '❌ Failed to refresh skills. Please try again.',
+        timestamp: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, errorMsg]);
+    }
+  };
+
   // Send message
   const handleSend = async (content) => {
     if (!activeSessionId || isStreaming) return;
+
+    // Handle refresh-skills command
+    if (content.trim() === '/refresh-skills') {
+      await handleRefreshSkills();
+      return;
+    }
 
     const userMsg = { role: 'user', content, timestamp: new Date().toISOString() };
     setMessages(prev => [...prev, userMsg]);
@@ -114,7 +153,7 @@ function ChatPage() {
       const res = await fetch(`${API_BASE}/sessions/${activeSessionId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content })
+        body: JSON.stringify({ content, mode })
       });
 
       const reader = res.body.getReader();
@@ -195,16 +234,138 @@ function ChatPage() {
     setActiveSessionId(newSession.id);
   };
 
-  // Handle command palette selection
-  const handleCommandSelect = (item) => {
-    if (item.category === 'mcp') {
-      // For MCP tools, insert a template prompt
-      handleSend(`Use the ${item.name} MCP tool to `);
-    } else if (item.name?.startsWith('/')) {
-      // Slash commands — send directly
-      handleSend(item.name);
+  // Delete session
+  const handleDeleteSession = async (sessionId) => {
+    if (!confirm('Delete this session? This cannot be undone.')) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+        method: 'DELETE'
+      });
+
+      if (!res.ok) throw new Error('Failed to delete session');
+
+      // If deleted session was active, clear active session
+      if (sessionId === activeSessionId) {
+        setActiveSessionId(null);
+        setMessages([]);
+      }
+
+      fetchSessions();
+    } catch (err) {
+      console.error('Delete session failed:', err);
+      alert('Failed to delete session');
     }
   };
+
+  // Handle command palette selection
+  const handleCommandSelect = (item) => {
+    if (item.category === 'session' || item.category === 'agent') {
+      // Session commands and agents — send directly
+      handleSend(item.name);
+      setShowPalette(false);
+    } else if (item.category === 'skill') {
+      // Skills — insert into input box for multi-selection
+      setSelectedCommand(item);
+      // Keep palette open for multiple selections
+      // User can close with Esc or click outside
+    } else if (item.category === 'mcp') {
+      // For MCP tools, insert a template prompt and close
+      handleSend(`Use the ${item.name} MCP tool to `);
+      setShowPalette(false);
+    }
+  };
+
+  // Handle compact (using backend API)
+  const handleCompact = async () => {
+    if (!activeSessionId) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${activeSessionId}/compact`, {
+        method: 'POST'
+      });
+
+      if (!res.ok) throw new Error('Compact failed');
+
+      const data = await res.json();
+
+      // Add system message with compact result
+      const systemMsg = {
+        role: 'assistant',
+        content: data.message || '✅ Context compacted successfully',
+        timestamp: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, systemMsg]);
+
+      // Refresh context after compact
+      await fetchContextUsage();
+    } catch (err) {
+      console.error('[Compact] Failed:', err);
+      const errorMsg = {
+        role: 'assistant',
+        content: '❌ Failed to compact context. Please try again.',
+        timestamp: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, errorMsg]);
+    }
+  };
+
+  // Handle mode change
+  const handleModeChange = (newMode) => {
+    setMode(newMode);
+    // Add system message to notify mode change
+    const modeLabels = { ask: 'Ask Mode', plan: 'Plan Mode', bypass: 'Bypass Mode' };
+    const systemMsg = {
+      role: 'assistant',
+      content: `🔄 Switched to ${modeLabels[newMode]}`,
+      timestamp: new Date().toISOString()
+    };
+    setMessages(prev => [...prev, systemMsg]);
+  };
+
+  // Auto-compact when context usage >= 90%
+  useEffect(() => {
+    if (contextUsage >= 90 && activeSessionId && !isStreaming) {
+      console.log('[Auto-Compact] Context usage >= 90%, triggering auto-compact...');
+      handleCompact();
+    }
+  }, [contextUsage, activeSessionId, isStreaming]);
+
+  // Fetch context usage from API
+  const fetchContextUsage = useCallback(async () => {
+    if (!activeSessionId) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${activeSessionId}/context`);
+      if (!res.ok) throw new Error('Failed to fetch context');
+
+      const data = await res.json();
+      setContextUsage(data.percentage || 0);
+    } catch (err) {
+      console.error('[Context] Failed to fetch:', err);
+      // Keep existing context usage on error
+    }
+  }, [activeSessionId]);
+
+  // Poll context usage every 30 seconds
+  useEffect(() => {
+    if (!activeSessionId) return;
+
+    // Initial fetch
+    fetchContextUsage();
+
+    // Set up polling interval
+    const interval = setInterval(fetchContextUsage, 30000);
+
+    return () => clearInterval(interval);
+  }, [activeSessionId, fetchContextUsage]);
+
+  // Also refresh context after each message
+  useEffect(() => {
+    if (messages.length > 0 && !isStreaming) {
+      fetchContextUsage();
+    }
+  }, [messages.length, isStreaming, fetchContextUsage]);
 
   if (loading) {
     return (
@@ -224,6 +385,7 @@ function ChatPage() {
         onSelect={setActiveSessionId}
         onNew={() => setShowNewModal(true)}
         onClose={() => setDrawerOpen(false)}
+        onDelete={handleDeleteSession}
       />
 
       {/* Main Chat Area */}
@@ -235,6 +397,10 @@ function ChatPage() {
           onModelChange={handleModelChange}
           onRename={handleRename}
           onOpenPalette={() => setShowPalette(true)}
+          contextUsage={contextUsage}
+          onCompact={handleCompact}
+          mode={mode}
+          onModeChange={handleModeChange}
         />
 
         {activeSessionId ? (
@@ -250,6 +416,7 @@ function ChatPage() {
               isStreaming={isStreaming}
               onOpenPalette={() => setShowPalette(true)}
               commands={commands}
+              selectedCommand={selectedCommand}
             />
           </>
         ) : (

@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import ContextIndicator from './ContextIndicator.jsx';
+import ModeSelector from './ModeSelector.jsx';
 
 const MODEL_COLORS = {
   sonnet: 'bg-blue-500/20 text-blue-400 border-blue-500/50',
@@ -6,7 +8,18 @@ const MODEL_COLORS = {
   haiku: 'bg-green-500/20 text-green-400 border-green-500/50'
 };
 
-function ChatHeader({ session, models, onMenuToggle, onModelChange, onRename, onOpenPalette }) {
+function ChatHeader({
+  session,
+  models,
+  onMenuToggle,
+  onModelChange,
+  onRename,
+  onOpenPalette,
+  contextUsage = 0,
+  onCompact,
+  mode = 'ask',
+  onModeChange
+}) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(session?.sessionName || '');
 
@@ -34,8 +47,10 @@ function ChatHeader({ session, models, onMenuToggle, onModelChange, onRename, on
   }
 
   return (
-    <div className="flex items-center justify-between px-2 sm:px-3 py-2 bg-slate-800 border-b border-slate-700">
-      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+    <div className="flex flex-col gap-2 px-2 sm:px-3 py-2 bg-slate-800 border-b border-slate-700">
+      {/* Top row: Session name and basic controls */}
+      <div className="flex items-center justify-between min-w-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
         <button
           onClick={onMenuToggle}
           className="w-10 h-10 shrink-0 flex items-center justify-center rounded-lg hover:bg-slate-700 active:bg-slate-600 transition-colors sm:hidden"
@@ -91,6 +106,13 @@ function ChatHeader({ session, models, onMenuToggle, onModelChange, onRename, on
           session.status === 'crashed' ? 'bg-red-400' :
           'bg-slate-500'
         }`} title={session.status} />
+        </div>
+      </div>
+
+      {/* Bottom row: Mode selector and context indicator */}
+      <div className="flex items-center justify-between gap-2">
+        <ModeSelector currentMode={mode} onModeChange={onModeChange} />
+        <ContextIndicator percentage={contextUsage} onCompact={onCompact} />
       </div>
     </div>
   );

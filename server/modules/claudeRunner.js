@@ -11,13 +11,18 @@ class ClaudeRunner extends EventEmitter {
   /**
    * Send a message to a Claude session and stream the response.
    * Returns an EventEmitter that emits: 'data' (SSE events), 'error', 'end'
+   * @param {string} sessionId - Session ID
+   * @param {string} content - Message content
+   * @param {object} options - Optional parameters
+   * @param {string} options.mode - Mode (ask/plan/bypass), affects permission-mode
    */
-  async sendMessage(sessionId, content) {
+  async sendMessage(sessionId, content, options = {}) {
     const store = getChatSessionStore();
     const session = store.get(sessionId);
     if (!session) throw new Error('Session not found');
 
-    const { serverIp, model, claudeSessionId, allowedTools, systemPrompt } = session;
+    const { serverIp, model, claudeSessionId, allowedTools, systemPrompt, mode: sessionMode } = session;
+    const mode = options.mode || sessionMode || 'ask';
 
     // Build claude command
     // NOTE: --allowedTools is variadic and consumes all remaining positional args,
@@ -31,7 +36,13 @@ class ClaudeRunner extends EventEmitter {
     args.push('--model', model);
     args.push('--output-format', 'stream-json');
     args.push('--verbose');
-    args.push('--permission-mode', 'bypassPermissions');
+
+    // Map mode to permission-mode
+    // ask: normal mode (requireApproval)
+    // plan: plan mode (requireApproval)
+    // bypass: bypass mode (bypassPermissions)
+    const permissionMode = mode === 'bypass' ? 'bypassPermissions' : 'requireApproval';
+    args.push('--permission-mode', permissionMode);
 
     if (systemPrompt && !claudeSessionId) {
       args.push('--system-prompt', JSON.stringify(systemPrompt));
@@ -233,6 +244,128 @@ class ClaudeRunner extends EventEmitter {
       return { alive: true };
     } catch {
       return { alive: false, reason: 'Process not found' };
+    }
+  }
+
+  /**
+   * Get context usage for a session by executing /context command
+   * Returns { used, total, percentage } or null if session not found
+   */
+  async getContext(sessionId) {
+    const store = getChatSessionStore();
+    const session = store.get(sessionId);
+    if (!session) return null;
+
+    const { serverIp, claudeSessionId } = session;
+    if (!claudeSessionId) {
+      // No Claude session yet, return 0 usage
+      return { used: 0, total: 200000, percentage: 0 };
+    }
+
+    try {
+      const claudePath = await this._detectClaudePath(serverIp);
+      const command = `cd /home/ubuntu/agent-skill && ${claudePath} -p --resume ${claudeSessionId} --output-format stream-json '/context'`;
+
+      console.log(`[ClaudeRunner] Getting context for session ${sessionId} on ${serverIp}`);
+
+      const pool = getSSHPool();
+      const output = await pool.exec(serverIp, command, { timeout: 15000 });
+
+      // Parse the stream-json output to find context info
+      const lines = output.split('\n').filter(line => line.trim());
+      let contextInfo = { used: 0, total: 200000, percentage: 0 };
+
+      for (const line of lines) {
+        try {
+          const parsed = JSON.parse(line);
+
+          // Look for assistant response with context info
+          if (parsed.type === 'assistant' && parsed.message?.content) {
+            const textBlocks = parsed.message.content
+              .filter(b => b.type === 'text')
+              .map(b => b.text)
+              .join('');
+
+            // Match "Token usage: 75000/200000" or similar
+            const tokenMatch = textBlocks.match(/Token usage:\s*(\d+)\/(\d+)/i);
+            if (tokenMatch) {
+              const used = parseInt(tokenMatch[1], 10);
+              const total = parseInt(tokenMatch[2], 10);
+              contextInfo = {
+                used,
+                total,
+                percentage: Math.round((used / total) * 100)
+              };
+              break;
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      return contextInfo;
+    } catch (err) {
+      console.error(`[ClaudeRunner] Failed to get context for ${sessionId}:`, err.message);
+      return { used: 0, total: 200000, percentage: 0 };
+    }
+  }
+
+  /**
+   * Compact a session's context by executing /compact command
+   * Returns the compaction result message or error
+   */
+  async compact(sessionId) {
+    const store = getChatSessionStore();
+    const session = store.get(sessionId);
+    if (!session) throw new Error('Session not found');
+
+    const { serverIp, claudeSessionId } = session;
+    if (!claudeSessionId) {
+      throw new Error('Cannot compact: No active Claude session');
+    }
+
+    try {
+      const claudePath = await this._detectClaudePath(serverIp);
+      const command = `cd /home/ubuntu/agent-skill && ${claudePath} -p --resume ${claudeSessionId} --output-format stream-json '/compact'`;
+
+      console.log(`[ClaudeRunner] Compacting session ${sessionId} on ${serverIp}`);
+
+      const pool = getSSHPool();
+      const output = await pool.exec(serverIp, command, { timeout: 30000 });
+
+      // Parse the stream-json output to extract compact result
+      const lines = output.split('\n').filter(line => line.trim());
+      let resultMessage = 'Context compacted successfully';
+
+      for (const line of lines) {
+        try {
+          const parsed = JSON.parse(line);
+
+          // Extract assistant response about compaction
+          if (parsed.type === 'assistant' && parsed.message?.content) {
+            const textBlocks = parsed.message.content
+              .filter(b => b.type === 'text')
+              .map(b => b.text)
+              .join('');
+
+            if (textBlocks.trim()) {
+              resultMessage = textBlocks.trim();
+              break;
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      // Add system message to session history
+      store.addMessage(sessionId, 'assistant', resultMessage);
+
+      return { success: true, message: resultMessage };
+    } catch (err) {
+      console.error(`[ClaudeRunner] Failed to compact ${sessionId}:`, err.message);
+      throw new Error(`Compact failed: ${err.message}`);
     }
   }
 

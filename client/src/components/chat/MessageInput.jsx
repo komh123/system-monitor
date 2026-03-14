@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 
 const API_BASE = '/api/chat';
 
-function MessageInput({ onSend, disabled, onStop, isStreaming, onOpenPalette, commands = [] }) {
+function MessageInput({ onSend, disabled, onStop, isStreaming, onOpenPalette, commands = [], selectedCommand = null }) {
   const [text, setText] = useState('');
   const [filteredCommands, setFilteredCommands] = useState([]);
   const [showAutocomplete, setShowAutocomplete] = useState(false);
@@ -17,6 +17,23 @@ function MessageInput({ onSend, disabled, onStop, isStreaming, onOpenPalette, co
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 120) + 'px';
   }, [text]);
+
+  // Handle command selected from CommandPalette
+  useEffect(() => {
+    if (selectedCommand && selectedCommand.name) {
+      // Append to existing text (for multi-skill selection)
+      setText(prev => {
+        const trimmed = prev.trim();
+        if (trimmed) {
+          // Add space if there's existing text
+          return trimmed + ' ' + selectedCommand.name;
+        }
+        return selectedCommand.name;
+      });
+      // Focus textarea
+      textareaRef.current?.focus();
+    }
+  }, [selectedCommand]);
 
   // Handle command filtering
   useEffect(() => {

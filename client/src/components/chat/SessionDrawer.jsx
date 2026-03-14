@@ -41,26 +41,43 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
               </div>
             ) : (
               sessions.map(s => (
-                <button
+                <div
                   key={s.id}
-                  onClick={() => { onSelect(s.id); onClose(); }}
-                  className={`w-full text-left px-3 py-3 border-b border-slate-700/50 transition-colors btn-inline ${
-                    s.id === activeId
-                      ? 'bg-slate-700/50'
-                      : 'hover:bg-slate-700/30 active:bg-slate-700/50'
+                  className={`w-full border-b border-slate-700/50 transition-colors ${
+                    s.id === activeId ? 'bg-slate-700/50' : ''
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium truncate">{s.sessionName}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES.sonnet}`}>
-                      {s.model}
-                    </span>
+                  <div className="flex items-stretch">
+                    <button
+                      onClick={() => { onSelect(s.id); onClose(); }}
+                      className={`flex-1 text-left px-3 py-3 transition-colors btn-inline ${
+                        s.id === activeId
+                          ? ''
+                          : 'hover:bg-slate-700/30 active:bg-slate-700/50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium truncate">{s.sessionName}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES.sonnet}`}>
+                          {s.model}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-slate-500">
+                        <span>{s.messageCount} msgs</span>
+                        <span>{new Date(s.lastActivity).toLocaleDateString()}</span>
+                      </div>
+                    </button>
+                    {onDelete && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onDelete(s.id); }}
+                        className="w-10 flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition-colors"
+                        title="Delete session"
+                      >
+                        🗑️
+                      </button>
+                    )}
                   </div>
-                  <div className="flex items-center justify-between text-[10px] text-slate-500">
-                    <span>{s.messageCount} msgs</span>
-                    <span>{new Date(s.lastActivity).toLocaleDateString()}</span>
-                  </div>
-                </button>
+                </div>
               ))
             )}
           </div>

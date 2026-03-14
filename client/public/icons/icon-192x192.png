@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="100" fill="#3b82f6"/>
+
+  <!-- Monitor Frame -->
+  <rect x="96" y="96" width="320" height="240" rx="12" fill="#0f172a" stroke="#60a5fa" stroke-width="8"/>
+
+  <!-- Screen Content - Terminal Lines -->
+  <line x1="120" y1="140" x2="280" y2="140" stroke="#22c55e" stroke-width="6" stroke-linecap="round"/>
+  <line x1="120" y1="170" x2="360" y2="170" stroke="#22c55e" stroke-width="6" stroke-linecap="round"/>
+  <line x1="120" y1="200" x2="240" y2="200" stroke="#22c55e" stroke-width="6" stroke-linecap="round"/>
+  <line x1="120" y1="230" x2="320" y2="230" stroke="#22c55e" stroke-width="6" stroke-linecap="round"/>
+  <line x1="120" y1="260" x2="200" y2="260" stroke="#22c55e" stroke-width="6" stroke-linecap="round"/>
+  <line x1="120" y1="290" x2="340" y2="290" stroke="#22c55e" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Cursor -->
+  <rect x="350" y="285" width="12" height="20" fill="#22c55e" opacity="0.8">
+    <animate attributeName="opacity" values="0.8;0;0.8" dur="1s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Monitor Stand -->
+  <rect x="226" y="336" width="60" height="40" rx="4" fill="#1e293b"/>
+  <rect x="176" y="376" width="160" height="12" rx="6" fill="#1e293b"/>
+
+  <!-- Claude AI Badge -->
+  <circle cx="380" cy="140" r="32" fill="#f59e0b"/>
+  <text x="380" y="152" font-size="32" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-weight="bold">AI</text>
+</svg>
