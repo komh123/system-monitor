@@ -2,6 +2,28 @@
 
 A comprehensive monitoring system that tracks CPU/memory usage and monitors Claude Code Remote Control sessions across multiple servers with automatic recovery capabilities.
 
+## 🚀 Latest Feature: Dynamic Skills Detection (v2.21.0)
+
+**Production Ready!** Dynamic per-server skills detection via SSH.
+
+- ✅ **Server-Specific Skills**: Each server returns its own installed skills
+- ✅ **Auto-Discovery**: New skills detected automatically (no code changes needed)
+- ✅ **Fast**: <1s SSH execution (10x faster than `claude skills list`)
+- ✅ **Reliable**: Safe fallback to static list on SSH failure
+- ✅ **Production Tested**:
+  - Server A (172.31.6.240): 1 skill
+  - Server B (18.181.190.83): 30 skills
+
+**Quick Test**:
+```bash
+curl "https://monitor.ko.unieai.com/api/chat/skills?serverIp=18.181.190.83"
+```
+
+📚 **Documentation**:
+- [DYNAMIC_SKILLS_SUCCESS.md](DYNAMIC_SKILLS_SUCCESS.md) - Test results & validation
+- [SKILLS_DETECTION.md](SKILLS_DETECTION.md) - Architecture details
+- [HOW_TO_ENABLE_DYNAMIC_SKILLS.md](HOW_TO_ENABLE_DYNAMIC_SKILLS.md) - Deployment guide
+
 ## Features
 
 ### 1. CPU and Memory Monitoring
