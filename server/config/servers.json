@@ -1,0 +1,16 @@
+[
+  {
+    "ip": "172.31.6.240",
+    "alias": "Server A",
+    "hostname": "ip-172-31-6-240",
+    "user": "ubuntu",
+    "privateKeyPath": "/root/.ssh/id_rsa"
+  },
+  {
+    "ip": "18.181.190.83",
+    "alias": "Server B",
+    "hostname": "ip-18-181-190-83",
+    "user": "ubuntu",
+    "privateKeyPath": "/root/.ssh/id_rsa"
+  }
+]

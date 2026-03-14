@@ -1,0 +1,11 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: system-monitor-headers
+  namespace: deployer-dev
+spec:
+  headers:
+    customResponseHeaders:
+      Cache-Control: "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+      Expires: "0"
+      Pragma: "no-cache"

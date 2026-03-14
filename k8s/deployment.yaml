@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: system-monitor
+  namespace: deployer-dev
+  labels:
+    app: system-monitor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: system-monitor
+  template:
+    metadata:
+      labels:
+        app: system-monitor
+    spec:
+      hostPID: true
+      hostNetwork: false
+      initContainers:
+      - name: fix-ssh-permissions
+        image: busybox:latest
+        command: ['sh', '-c', 'cp /ssh-keys/id_rsa /root/.ssh/id_rsa && chmod 600 /root/.ssh/id_rsa']
+        volumeMounts:
+        - name: ssh-keys-configmap
+          mountPath: /ssh-keys
+          readOnly: true
+        - name: ssh-keys
+          mountPath: /root/.ssh
+      containers:
+      - name: system-monitor
+        image: localhost:30500/system-monitor:v2.0
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"
+        - name: ALERT_EMAIL
+          value: "cuppot123@gmail.com"
+        - name: MONITOR_INTERVAL
+          value: "30"
+        - name: DYNAMIC_SKILLS
+          value: "true"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+        volumeMounts:
+        - name: proc
+          mountPath: /proc
+          readOnly: true
+        - name: sys
+          mountPath: /sys
+          readOnly: true
+        - name: watchdog-metrics
+          mountPath: /home/ubuntu/cpu-watchdog-metrics.json
+          readOnly: true
+        - name: watchdog-log
+          mountPath: /home/ubuntu/cpu-watchdog.log
+          readOnly: true
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
+          readOnly: true
+        - name: ssh-keys
+          mountPath: /root/.ssh
+          readOnly: true
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: sys
+        hostPath:
+          path: /sys
+      - name: watchdog-metrics
+        hostPath:
+          path: /home/ubuntu/cpu-watchdog-metrics.json
+          type: FileOrCreate
+      - name: watchdog-log
+        hostPath:
+          path: /home/ubuntu/cpu-watchdog.log
+          type: FileOrCreate
+      - name: docker-sock
+        hostPath:
+          path: /var/run/docker.sock
+      - name: ssh-keys-configmap
+        configMap:
+          name: ssh-keys
+          defaultMode: 0600
+      - name: ssh-keys
+        emptyDir: {}

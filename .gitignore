@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build output
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime data
+server/data/*.db
+server/data/*.json
+!server/data/.gitkeep
+
+# SSH keys (security)
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+
+# Temporary files
+.tmp/
+tmp/
+*.tmp

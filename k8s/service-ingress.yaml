@@ -1,0 +1,42 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: system-monitor
+  namespace: deployer-dev
+  labels:
+    app: system-monitor
+spec:
+  selector:
+    app: system-monitor
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 3000
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: system-monitor
+  namespace: deployer-dev
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    traefik.ingress.kubernetes.io/router.middlewares: deployer-dev-system-monitor-headers@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+  - hosts:
+    - monitor.ko.unieai.com
+    secretName: system-monitor-tls
+  rules:
+  - host: monitor.ko.unieai.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: system-monitor
+            port:
+              number: 80
