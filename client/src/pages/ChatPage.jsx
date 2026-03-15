@@ -48,37 +48,32 @@ function ChatPage() {
       fetch(`${API_BASE}/commands`).then(r => r.json())
     ]).then(([mData, cData]) => {
       setModels(mData.models || []);
-      // Load static session commands + agents (skills loaded per-server)
+      // Load ALL static commands: session commands + skills + agents
       const staticCommands = [
         ...(cData.sessionCommands || []),
+        ...(cData.skills || []),
         ...(cData.agents || [])
       ];
       setCommands(staticCommands);
     }).catch(() => {});
   }, []);
 
-  // Fetch skills + MCP tools when active session changes (server-specific)
+  // Fetch MCP tools when active session changes (server-specific)
   useEffect(() => {
     if (!activeSession?.serverIp) {
-      setCommands(prev => prev.filter(c => c.category !== 'skill'));
       setMcpTools([]);
       return;
     }
 
-    // Fetch skills from remote server
-    Promise.all([
-      fetch(`${API_BASE}/skills?serverIp=${encodeURIComponent(activeSession.serverIp)}`).then(r => r.json()),
-      fetch(`${API_BASE}/mcp-tools?serverIp=${encodeURIComponent(activeSession.serverIp)}`).then(r => r.json())
-    ]).then(([skillData, mcpData]) => {
-      // Merge session commands + agents + server skills
-      setCommands(prev => {
-        const withoutSkills = prev.filter(c => c.category !== 'skill');
-        return [...withoutSkills, ...(skillData.skills || [])];
+    // Fetch MCP tools from remote server
+    fetch(`${API_BASE}/mcp-tools?serverIp=${encodeURIComponent(activeSession.serverIp)}`)
+      .then(r => r.json())
+      .then(mcpData => {
+        setMcpTools(mcpData.tools || []);
+      })
+      .catch(() => {
+        setMcpTools([]);
       });
-      setMcpTools(mcpData.tools || []);
-    }).catch(() => {
-      setMcpTools([]);
-    });
   }, [activeSession?.serverIp]);
 
   useEffect(() => { fetchSessions(); }, [fetchSessions]);
