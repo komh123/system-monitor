@@ -7,6 +7,7 @@ import CpuMonitor from './pages/CpuMonitor';
 import ClaudeRemoteMonitor from './pages/ClaudeRemoteMonitor';
 import RecoveryLogs from './pages/RecoveryLogs';
 import ChatPage from './pages/ChatPage';
+import UsagePage from './pages/UsagePage';
 
 function App() {
   return (
@@ -26,6 +27,7 @@ function App() {
                 <Route path="/claude-remote" element={<ClaudeRemoteMonitor />} />
                 <Route path="/logs" element={<RecoveryLogs />} />
                 <Route path="/chat" element={<ChatPage />} />
+                <Route path="/usage" element={<UsagePage />} />
               </Routes>
             </div>
           </ProtectedRoute>

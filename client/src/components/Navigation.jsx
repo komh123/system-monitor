@@ -9,7 +9,8 @@ function Navigation() {
     { path: '/cpu', label: 'CPU Monitor', icon: '🖥️' },
     { path: '/claude-remote', label: 'Claude Remote', icon: '🤖' },
     { path: '/logs', label: 'Recovery Logs', icon: '📋' },
-    { path: '/chat', label: 'Chat', icon: '💬' }
+    { path: '/chat', label: 'Chat', icon: '💬' },
+    { path: '/usage', label: 'Usage', icon: '📊' }
   ];
 
   const handleLogout = () => {

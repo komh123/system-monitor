@@ -10,6 +10,7 @@ import cron from 'node-cron';
 import { getMonitorOrchestrator } from './modules/monitorOrchestrator.js';
 import chatRoutes from './routes/chatRoutes.js';
 import authRoutes from './routes/authRoutes.js';
+import usageRoutes from './routes/usageRoutes.js';
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -96,6 +97,7 @@ app.use(cors());
 app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/usage', usageRoutes);
 
 // Serve static files in production with no-cache headers
 if (process.env.NODE_ENV === 'production') {

@@ -29,7 +29,7 @@ spec:
           mountPath: /root/.ssh
       containers:
       - name: system-monitor
-        image: localhost:30500/system-monitor:v2.29.0
+        image: localhost:30500/system-monitor:v2.30.0
         imagePullPolicy: Always
         securityContext:
           privileged: true
@@ -97,6 +97,9 @@ spec:
         - name: ssh-keys
           mountPath: /root/.ssh
           readOnly: true
+        - name: claude-credentials
+          mountPath: /home/ubuntu/.claude
+          readOnly: true
         livenessProbe:
           httpGet:
             path: /health
@@ -133,3 +136,7 @@ spec:
           defaultMode: 0600
       - name: ssh-keys
         emptyDir: {}
+      - name: claude-credentials
+        hostPath:
+          path: /home/ubuntu/.claude
+          type: Directory
