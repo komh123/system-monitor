@@ -29,7 +29,7 @@ spec:
           mountPath: /root/.ssh
       containers:
       - name: system-monitor
-        image: localhost:30500/system-monitor:v2.28.0-pwa
+        image: localhost:30500/system-monitor:v2.29.0
         imagePullPolicy: Always
         securityContext:
           privileged: true
@@ -46,6 +46,32 @@ spec:
           value: "30"
         - name: DYNAMIC_SKILLS
           value: "true"
+        # Google OAuth credentials from Secret
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: system-monitor-auth
+              key: JWT_SECRET
+        - name: GOOGLE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: system-monitor-auth
+              key: GOOGLE_CLIENT_ID
+        - name: GOOGLE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: system-monitor-auth
+              key: GOOGLE_CLIENT_SECRET
+        - name: GOOGLE_REDIRECT_URI
+          valueFrom:
+            secretKeyRef:
+              name: system-monitor-auth
+              key: GOOGLE_REDIRECT_URI
+        - name: ALLOWED_EMAILS
+          valueFrom:
+            secretKeyRef:
+              name: system-monitor-auth
+              key: ALLOWED_EMAILS
         resources:
           requests:
             memory: "64Mi"

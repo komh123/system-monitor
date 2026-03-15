@@ -9,6 +9,7 @@ import nodemailer from 'nodemailer';
 import cron from 'node-cron';
 import { getMonitorOrchestrator } from './modules/monitorOrchestrator.js';
 import chatRoutes from './routes/chatRoutes.js';
+import authRoutes from './routes/authRoutes.js';
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -93,6 +94,7 @@ async function sendCpuAlert(pid, cpu, threshold) {
 
 app.use(cors());
 app.use(express.json());
+app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 
 // Serve static files in production with no-cache headers

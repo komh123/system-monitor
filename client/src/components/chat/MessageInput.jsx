@@ -81,6 +81,15 @@ function MessageInput({ onSend, disabled, onStop, isStreaming, onOpenPalette, co
   };
 
   const handleKeyDown = (e) => {
+    // Cmd+K or Ctrl+K to open Command Palette (even with text)
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      if (onOpenPalette) {
+        onOpenPalette();
+      }
+      return;
+    }
+
     if (showAutocomplete) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
