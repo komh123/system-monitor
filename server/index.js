@@ -448,111 +448,130 @@ async function generateMetrics() {
 app.post('/api/disk/cleanup', async (req, res) => {
   try {
     const cleanupResults = [];
-    let totalFreed = 0;
 
     // Helper: run command on host via nsenter (requires hostPID: true)
     const runOnHost = (cmd) => {
-      // Use single quotes for outer shell, escape single quotes in command
       const escapedCmd = cmd.replace(/'/g, "'\\''");
       return execAsync(`nsenter -t 1 -m -u -n -i sh -c '${escapedCmd}'`, { timeout: 300000 });
     };
 
-    // 1. Clean Docker unused images and build cache (run on host)
+    // Helper: measure size before deletion (in MB)
+    const getDirSizeMB = async (path) => {
+      try {
+        const { stdout } = await runOnHost(`du -sm ${path} 2>/dev/null | awk '{print $1}'`);
+        return parseInt(stdout.trim()) || 0;
+      } catch { return 0; }
+    };
+
+    // Snapshot disk usage BEFORE cleanup
+    const { stdout: diskBefore } = await runOnHost("df -BM / | awk 'NR==2{gsub(/M/,\"\"); print $3}'");
+    const diskUsedBefore = parseInt(diskBefore.trim()) || 0;
+
+    // 1. Docker: prune dangling images + stopped containers + build cache (NOT -a, preserve active images)
     try {
-      const { stdout: dockerPrune } = await runOnHost('docker system prune -a --volumes -f 2>/dev/null; docker builder prune -a -f 2>/dev/null');
-      const dockerMatch = dockerPrune.match(/Total reclaimed space:\s*([\d.]+)\s*(\w+)/i);
-      if (dockerMatch) {
-        const size = parseFloat(dockerMatch[1]);
-        const unit = dockerMatch[2].toUpperCase();
-        const sizeInMB = unit === 'GB' ? size * 1024 : unit === 'KB' ? size / 1024 : size;
-        totalFreed += sizeInMB;
-        cleanupResults.push({ task: 'Docker cleanup', freed: `${dockerMatch[1]} ${dockerMatch[2]}`, success: true });
-      } else {
-        cleanupResults.push({ task: 'Docker cleanup', freed: '0 B', success: true });
+      const { stdout: dockerPrune } = await runOnHost(
+        'docker container prune -f 2>/dev/null; docker image prune -f 2>/dev/null; docker builder prune -f --keep-storage=2GB 2>/dev/null; docker volume prune -f --filter "label!=keep" 2>/dev/null'
+      );
+      const matches = [...dockerPrune.matchAll(/Total reclaimed space:\s*([\d.]+)\s*(\w+)/gi)];
+      let dockerFreedMB = 0;
+      for (const m of matches) {
+        const size = parseFloat(m[1]);
+        const unit = m[2].toUpperCase();
+        dockerFreedMB += unit === 'GB' ? size * 1024 : unit === 'KB' ? size / 1024 : size;
       }
+      cleanupResults.push({
+        task: 'Docker (containers + dangling images + build cache)',
+        freed: dockerFreedMB > 1024 ? `${(dockerFreedMB / 1024).toFixed(1)} GB` : `${Math.round(dockerFreedMB)} MB`,
+        success: true
+      });
     } catch (err) {
       cleanupResults.push({ task: 'Docker cleanup', error: err.message, success: false });
     }
 
-    // 2. Clean browser caches (Puppeteer, Playwright) - run on host
+    // 2. Syslog rotation + old logs
     try {
-      await runOnHost('rm -rf /home/ubuntu/.cache/puppeteer /home/ubuntu/.cache/ms-playwright-go /home/ubuntu/.cache/typescript 2>/dev/null || true');
-      cleanupResults.push({ task: 'Browser caches', freed: '~1.3 GB', success: true });
-      totalFreed += 1300; // Estimated
+      const beforeLog = await getDirSizeMB('/var/log');
+      await runOnHost('journalctl --vacuum-size=50M 2>/dev/null; rm -f /var/log/syslog.[2-9]* /var/log/auth.log.[2-9]* /var/log/btmp.* 2>/dev/null; truncate -s 0 /var/log/syslog.1 /var/log/auth.log.1 2>/dev/null || true');
+      const afterLog = await getDirSizeMB('/var/log');
+      const freedLog = Math.max(0, beforeLog - afterLog);
+      cleanupResults.push({ task: 'System logs (journal + syslog)', freed: `${freedLog} MB`, success: true });
     } catch (err) {
-      cleanupResults.push({ task: 'Browser caches', error: err.message, success: false });
+      cleanupResults.push({ task: 'System logs', error: err.message, success: false });
     }
 
-    // 3. Clean system journal logs - run on host
+    // 3. NPM cache
     try {
-      await runOnHost('journalctl --vacuum-size=100M 2>/dev/null || true');
-      cleanupResults.push({ task: 'Journal logs', freed: 'trimmed to 100MB', success: true });
-      totalFreed += 700; // Estimated based on typical usage
+      const beforeNpm = await getDirSizeMB('/home/ubuntu/.npm/_cacache');
+      await runOnHost('rm -rf /home/ubuntu/.npm/_cacache 2>/dev/null || true');
+      cleanupResults.push({ task: 'NPM cache', freed: `${beforeNpm} MB`, success: true });
     } catch (err) {
-      cleanupResults.push({ task: 'Journal logs', error: err.message, success: false });
+      cleanupResults.push({ task: 'NPM cache', error: err.message, success: false });
     }
 
-    // 4. Clean APT cache - run on host
+    // 4. Caches (browser + node-gyp + pip + typescript)
     try {
-      await runOnHost('apt-get clean 2>/dev/null; apt-get autoremove -y 2>/dev/null || true');
-      cleanupResults.push({ task: 'APT cache', freed: '~400 MB', success: true });
-      totalFreed += 400; // Estimated
+      const targets = '/home/ubuntu/.cache/puppeteer /home/ubuntu/.cache/ms-playwright-go /home/ubuntu/.cache/typescript /home/ubuntu/.cache/node-gyp /home/ubuntu/.cache/pip /home/ubuntu/.cache/chrome-devtools-mcp';
+      const beforeCache = await getDirSizeMB('/home/ubuntu/.cache');
+      await runOnHost(`rm -rf ${targets} 2>/dev/null || true`);
+      const afterCache = await getDirSizeMB('/home/ubuntu/.cache');
+      const freedCache = Math.max(0, beforeCache - afterCache);
+      cleanupResults.push({ task: 'Dev caches (browser, node-gyp, pip)', freed: `${freedCache} MB`, success: true });
+    } catch (err) {
+      cleanupResults.push({ task: 'Dev caches', error: err.message, success: false });
+    }
+
+    // 5. APT cache
+    try {
+      const beforeApt = await getDirSizeMB('/var/lib/apt');
+      await runOnHost('apt-get clean 2>/dev/null || true');
+      const afterApt = await getDirSizeMB('/var/lib/apt');
+      const freedApt = Math.max(0, beforeApt - afterApt);
+      cleanupResults.push({ task: 'APT cache', freed: `${freedApt} MB`, success: true });
     } catch (err) {
       cleanupResults.push({ task: 'APT cache', error: err.message, success: false });
     }
 
-    // 5. Clean tmp files older than 7 days - run on host
+    // 6. Temp files older than 3 days
     try {
-      await runOnHost('find /tmp -type f -atime +7 -delete 2>/dev/null || true');
-      cleanupResults.push({ task: 'Old tmp files', freed: 'cleaned', success: true });
+      const beforeTmp = await getDirSizeMB('/tmp');
+      await runOnHost('find /tmp -type f -atime +3 -delete 2>/dev/null; find /tmp -type d -empty -delete 2>/dev/null || true');
+      const afterTmp = await getDirSizeMB('/tmp');
+      const freedTmp = Math.max(0, beforeTmp - afterTmp);
+      cleanupResults.push({ task: 'Temp files (>3 days)', freed: `${freedTmp} MB`, success: true });
     } catch (err) {
-      cleanupResults.push({ task: 'Old tmp files', error: err.message, success: false });
+      cleanupResults.push({ task: 'Temp files', error: err.message, success: false });
     }
 
-    // 6. Clean old claude-code-buddy processes (NEW)
+    // 7. Old claude-code-buddy processes (>1 day)
     try {
       const { stdout: oldPids } = await runOnHost(
         'ps -eo pid,etime,cmd | grep -E "claude-code-buddy|npm exec @pcircle" | grep -v grep | awk \'$2 ~ /-/ {print $1}\''
       );
       const pids = oldPids.trim().split('\n').filter(p => p);
-
       if (pids.length > 0) {
-        // Kill old processes
         await runOnHost(`echo "${pids.join(' ')}" | xargs kill 2>/dev/null || true`);
-        cleanupResults.push({
-          task: 'Old claude-code-buddy processes',
-          freed: `${pids.length} processes killed`,
-          success: true
-        });
-        totalFreed += pids.length * 35; // Estimate 35 MB per process
+        cleanupResults.push({ task: 'Old buddy processes (>1 day)', freed: `${pids.length} killed`, success: true });
       } else {
-        cleanupResults.push({
-          task: 'Old claude-code-buddy processes',
-          freed: '0 processes',
-          success: true
-        });
+        cleanupResults.push({ task: 'Old buddy processes (>1 day)', freed: '0', success: true });
       }
     } catch (err) {
-      cleanupResults.push({
-        task: 'Old claude-code-buddy processes',
-        error: err.message,
-        success: false
-      });
+      cleanupResults.push({ task: 'Old buddy processes', error: err.message, success: false });
     }
 
-    // Get updated disk info from host
-    const { stdout: diskInfo } = await runOnHost("df -BM / | awk 'NR==2{gsub(/M/,\"\"); print $2, $3, $4}'");
-    const [diskTotal, diskUsed, diskAvail] = diskInfo.trim().split(' ').map(Number);
+    // Snapshot disk usage AFTER cleanup — real measurement
+    const { stdout: diskAfterRaw } = await runOnHost("df -BM / | awk 'NR==2{gsub(/M/,\"\"); print $2, $3, $4}'");
+    const [diskTotal, diskUsedAfter, diskAvail] = diskAfterRaw.trim().split(' ').map(Number);
+    const actualFreed = Math.max(0, diskUsedBefore - diskUsedAfter);
 
     res.json({
       success: true,
       results: cleanupResults,
-      totalFreedEstimate: totalFreed > 1024 ? `${(totalFreed / 1024).toFixed(1)} GB` : `${totalFreed.toFixed(0)} MB`,
+      totalFreedEstimate: actualFreed > 1024 ? `${(actualFreed / 1024).toFixed(1)} GB` : `${actualFreed} MB`,
       disk: {
         total: diskTotal,
-        used: diskUsed,
+        used: diskUsedAfter,
         available: diskAvail,
-        percent: Math.round((diskUsed / diskTotal) * 100)
+        percent: Math.round((diskUsedAfter / diskTotal) * 100)
       }
     });
   } catch (error) {
@@ -564,73 +583,52 @@ app.post('/api/disk/cleanup', async (req, res) => {
 // Clean old claude-code-buddy processes
 app.post('/api/processes/claude-buddy/cleanup', async (req, res) => {
   try {
-    const cleanupResults = {
-      before: { count: 0, memory: 0 },
-      after: { count: 0, memory: 0 },
-      killed: []
-    };
-
-    // Helper: run command on host via nsenter
     const runOnHost = (cmd) => {
       const escapedCmd = cmd.replace(/'/g, "'\\''");
       return execAsync(`nsenter -t 1 -m -u -n -i sh -c '${escapedCmd}'`, { timeout: 60000 });
     };
 
-    // 1. Count processes before cleanup
-    const { stdout: beforeCount } = await runOnHost(
-      'ps aux | grep -E "claude-code-buddy|npm exec @pcircle" | grep -v grep | wc -l'
+    // Single combined command for before-state (count + memory + old PIDs) — 1 nsenter call instead of 3
+    const { stdout: beforeState } = await runOnHost(
+      'PATTERN="claude-code-buddy|npm exec @pcircle"; ' +
+      'COUNT=$(ps aux | grep -E "$PATTERN" | grep -v grep | wc -l); ' +
+      'MEM=$(ps aux | grep -E "$PATTERN" | grep -v grep | awk \'{sum+=$6} END {printf "%.0f", sum/1024}\'); ' +
+      'OLDPIDS=$(ps -eo pid,etime,cmd | grep -E "$PATTERN" | grep -v grep | awk \'$2 ~ /-/ {print $1}\' | tr "\\n" ","); ' +
+      'echo "$COUNT|$MEM|$OLDPIDS"'
     );
-    cleanupResults.before.count = parseInt(beforeCount.trim());
+    const [beforeCountStr, beforeMemStr, oldPidsStr] = beforeState.trim().split('|');
+    const beforeCount = parseInt(beforeCountStr) || 0;
+    const beforeMem = parseInt(beforeMemStr) || 0;
+    const pids = oldPidsStr ? oldPidsStr.split(',').filter(p => p.trim()) : [];
 
-    // 2. Calculate memory usage before cleanup
-    const { stdout: beforeMem } = await runOnHost(
-      'ps aux | grep -E "claude-code-buddy|npm exec @pcircle" | grep -v grep | awk \'{sum+=$6} END {print sum/1024}\''
-    );
-    cleanupResults.before.memory = Math.round(parseFloat(beforeMem.trim()) || 0);
-
-    // 3. Find and kill processes running more than 1 day
-    const { stdout: oldPids } = await runOnHost(
-      'ps -eo pid,etime,cmd | grep -E "claude-code-buddy|npm exec @pcircle" | grep -v grep | awk \'$2 ~ /-/ {print $1}\''
-    );
-
-    const pids = oldPids.trim().split('\n').filter(p => p);
-
-    // Kill old processes
-    for (const pid of pids) {
-      try {
-        await runOnHost(`kill ${pid}`);
-        cleanupResults.killed.push(parseInt(pid));
-      } catch (err) {
-        console.error(`Failed to kill PID ${pid}:`, err.message);
-      }
+    // Kill all old processes in a single nsenter call
+    const killed = [];
+    if (pids.length > 0) {
+      await runOnHost(`kill ${pids.join(' ')} 2>/dev/null || true`);
+      killed.push(...pids.map(p => parseInt(p)));
+      // Wait briefly for processes to terminate
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
 
-    // Wait for processes to terminate
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // 4. Count processes after cleanup
-    const { stdout: afterCount } = await runOnHost(
-      'ps aux | grep -E "claude-code-buddy|npm exec @pcircle" | grep -v grep | wc -l'
+    // Single combined command for after-state
+    const { stdout: afterState } = await runOnHost(
+      'PATTERN="claude-code-buddy|npm exec @pcircle"; ' +
+      'COUNT=$(ps aux | grep -E "$PATTERN" | grep -v grep | wc -l); ' +
+      'MEM=$(ps aux | grep -E "$PATTERN" | grep -v grep | awk \'{sum+=$6} END {printf "%.0f", sum/1024}\'); ' +
+      'echo "$COUNT|$MEM"'
     );
-    cleanupResults.after.count = parseInt(afterCount.trim());
-
-    // 5. Calculate memory usage after cleanup
-    const { stdout: afterMem } = await runOnHost(
-      'ps aux | grep -E "claude-code-buddy|npm exec @pcircle" | grep -v grep | awk \'{sum+=$6} END {print sum/1024}\''
-    );
-    cleanupResults.after.memory = Math.round(parseFloat(afterMem.trim()) || 0);
-
-    // Calculate freed resources
-    const processesKilled = cleanupResults.killed.length;
-    const memoryFreed = cleanupResults.before.memory - cleanupResults.after.memory;
+    const [afterCountStr, afterMemStr] = afterState.trim().split('|');
+    const afterCount = parseInt(afterCountStr) || 0;
+    const afterMem = parseInt(afterMemStr) || 0;
+    const memoryFreed = Math.max(0, beforeMem - afterMem);
 
     res.json({
       success: true,
-      processesKilled,
+      processesKilled: killed.length,
       memoryFreed: `${memoryFreed} MB`,
-      before: cleanupResults.before,
-      after: cleanupResults.after,
-      killed: cleanupResults.killed
+      before: { count: beforeCount, memory: beforeMem },
+      after: { count: afterCount, memory: afterMem },
+      killed
     });
   } catch (error) {
     console.error('Claude-Code-Buddy cleanup failed:', error);

@@ -114,9 +114,17 @@ function ClaudeBuddyCard({ data, onCleanup }) {
 
     setIsCleaningBuddy(true);
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 min timeout
       const res = await fetch(`${API_BASE}/processes/claude-buddy/cleanup`, {
-        method: 'POST'
+        method: 'POST',
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text.startsWith('{') ? JSON.parse(text).error : `Server error (${res.status})`);
+      }
       const result = await res.json();
 
       if (result.success) {
@@ -126,7 +134,8 @@ function ClaudeBuddyCard({ data, onCleanup }) {
       }
     } catch (error) {
       console.error('Cleanup failed:', error);
-      alert('清理失敗：' + error.message);
+      const msg = error.name === 'AbortError' ? '請求超時，清理可能仍在後台執行中' : error.message;
+      alert('清理失敗：' + msg);
     } finally {
       setIsCleaningBuddy(false);
     }
@@ -387,10 +396,13 @@ function DiskCard({ data, onCleanup }) {
     setCleanupResult(null);
 
     try {
-      const response = await fetch(`${API_BASE}/disk/cleanup`, { method: 'POST' });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 360000); // 6 min timeout (docker prune is slow)
+      const response = await fetch(`${API_BASE}/disk/cleanup`, { method: 'POST', signal: controller.signal });
+      clearTimeout(timeoutId);
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Cleanup failed');
+        const text = await response.text();
+        throw new Error(text.startsWith('{') ? JSON.parse(text).error : `Server error (${response.status})`);
       }
       const result = await response.json();
       setCleanupResult(result);
@@ -398,7 +410,8 @@ function DiskCard({ data, onCleanup }) {
       // Trigger metrics refresh
       if (onCleanup) onCleanup();
     } catch (err) {
-      alert('清理失敗：' + err.message);
+      const msg = err.name === 'AbortError' ? '請求超時，清理可能仍在後台執行中' : err.message;
+      alert('清理失敗：' + msg);
     } finally {
       setCleaning(false);
     }
