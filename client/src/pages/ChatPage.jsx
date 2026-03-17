@@ -174,6 +174,12 @@ function ChatPage() {
                 fullText += data.text;
                 setStreamingText(fullText);
               }
+              // Update context from result event (no polling needed)
+              if (data.contextUsed !== undefined) {
+                const total = data.contextTotal || 200000;
+                setContextTokens({ used: data.contextUsed, total });
+                setContextUsage(Math.round((data.contextUsed / total) * 100));
+              }
             } catch { /* ignore parse errors */ }
           }
         }
@@ -349,25 +355,11 @@ function ChatPage() {
     }
   }, [activeSessionId]);
 
-  // Poll context usage every 30 seconds
+  // Fetch context once when switching sessions (cached in backend, no SSH call)
   useEffect(() => {
     if (!activeSessionId) return;
-
-    // Initial fetch
     fetchContextUsage();
-
-    // Set up polling interval
-    const interval = setInterval(fetchContextUsage, 30000);
-
-    return () => clearInterval(interval);
   }, [activeSessionId, fetchContextUsage]);
-
-  // Also refresh context after each message
-  useEffect(() => {
-    if (messages.length > 0 && !isStreaming) {
-      fetchContextUsage();
-    }
-  }, [messages.length, isStreaming, fetchContextUsage]);
 
   if (loading) {
     return (

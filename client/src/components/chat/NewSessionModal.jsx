@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 
 const API_BASE = '/api/chat';
 
-const DEFAULT_TOOLS = ['Read', 'Edit', 'Bash', 'Write', 'Glob', 'Grep'];
+const DEFAULT_TOOLS = ['Read', 'Edit', 'Bash', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
 
 function NewSessionModal({ onClose, onCreate }) {
   const [servers, setServers] = useState([]);

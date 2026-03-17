@@ -1,5 +1,5 @@
 // Service Worker for System Monitor PWA
-const CACHE_VERSION = 'v2.33.4';
+const CACHE_VERSION = 'v2.34.0';
 const CACHE_NAME = `system-monitor-${CACHE_VERSION}`;
 
 // Only cache truly static assets (icons, manifest) — NOT index.html

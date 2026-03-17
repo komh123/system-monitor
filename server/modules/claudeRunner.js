@@ -2,6 +2,13 @@ import { getSSHPool } from './sshPool.js';
 import { getChatSessionStore } from './chatSessionStore.js';
 import { EventEmitter } from 'events';
 
+const DEFAULT_SYSTEM_PROMPT = `你是一個 agentic AI 助手。你的工作模式：
+1. 主動行動：收到任務後立即採取行動，不要等待用戶逐步指示。先分析問題，然後使用工具執行。
+2. Web 搜尋：當問題涉及最新資訊、即時數據、新聞、價格、天氣等，主動使用 WebSearch 搜尋網路獲取最新資訊。不要憑記憶回答時效性問題。
+3. 搜尋後總結時，附上來源連結。
+4. 回答使用繁體中文，除非用戶用其他語言提問。
+5. 回答要簡潔、有結構，善用 markdown 格式。`;
+
 class ClaudeRunner extends EventEmitter {
   constructor() {
     super();
@@ -51,8 +58,10 @@ class ClaudeRunner extends EventEmitter {
     const permissionMode = permissionModeMap[mode] || 'default';
     args.push('--permission-mode', permissionMode);
 
-    if (systemPrompt && !claudeSessionId) {
-      args.push('--system-prompt', JSON.stringify(systemPrompt));
+    // Apply system prompt only on first message (before session ID exists)
+    if (!claudeSessionId) {
+      const prompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
+      args.push('--system-prompt', JSON.stringify(prompt));
     }
 
     // Escape the user message for shell
@@ -84,7 +93,7 @@ class ClaudeRunner extends EventEmitter {
 
       const client = connection.client;
 
-      client.exec(fullCommand, { pty: true }, (err, stream) => {
+      client.exec(fullCommand, {}, (err, stream) => {
         if (err) {
           emitter.emit('error', err);
           return;
@@ -156,13 +165,27 @@ class ClaudeRunner extends EventEmitter {
                     status: 'running'
                   });
                 }
+                // Extract token usage from result for context tracking (avoids extra SSH exec)
+                const inputTokens = parsed.usage?.input_tokens || parsed.input_tokens || 0;
+                const outputTokens = parsed.usage?.output_tokens || parsed.output_tokens || 0;
+                const totalTokens = inputTokens + outputTokens;
+                const maxTokens = 200000;
+                if (totalTokens > 0) {
+                  store.update(sessionId, {
+                    contextUsed: totalTokens,
+                    contextTotal: maxTokens,
+                    contextPercentage: Math.round((totalTokens / maxTokens) * 100)
+                  });
+                }
                 emitter.emit('data', {
                   event: 'result',
                   data: {
                     sessionId: parsed.session_id,
                     costUsd: parsed.cost_usd,
                     durationMs: parsed.duration_ms,
-                    numTurns: parsed.num_turns
+                    numTurns: parsed.num_turns,
+                    contextUsed: totalTokens,
+                    contextTotal: maxTokens
                   }
                 });
               }
@@ -255,67 +278,19 @@ class ClaudeRunner extends EventEmitter {
   }
 
   /**
-   * Get context usage for a session by executing /context command
-   * Returns { used, total, percentage } or null if session not found
+   * Get context usage for a session from cached session data.
+   * No SSH call needed — context is tracked from 'result' events during messages.
    */
   async getContext(sessionId) {
     const store = getChatSessionStore();
     const session = store.get(sessionId);
     if (!session) return null;
 
-    const { serverIp, claudeSessionId } = session;
-    if (!claudeSessionId) {
-      // No Claude session yet, return 0 usage
-      return { used: 0, total: 200000, percentage: 0 };
-    }
-
-    try {
-      const claudePath = await this._detectClaudePath(serverIp);
-      const command = `cd /home/ubuntu/agent-skill && ${claudePath} -p --resume ${claudeSessionId} --output-format stream-json '/context'`;
-
-      console.log(`[ClaudeRunner] Getting context for session ${sessionId} on ${serverIp}`);
-
-      const pool = getSSHPool();
-      const output = await pool.exec(serverIp, command, { timeout: 15000 });
-
-      // Parse the stream-json output to find context info
-      const lines = output.split('\n').filter(line => line.trim());
-      let contextInfo = { used: 0, total: 200000, percentage: 0 };
-
-      for (const line of lines) {
-        try {
-          const parsed = JSON.parse(line);
-
-          // Look for assistant response with context info
-          if (parsed.type === 'assistant' && parsed.message?.content) {
-            const textBlocks = parsed.message.content
-              .filter(b => b.type === 'text')
-              .map(b => b.text)
-              .join('');
-
-            // Match "Token usage: 75000/200000" or similar
-            const tokenMatch = textBlocks.match(/Token usage:\s*(\d+)\/(\d+)/i);
-            if (tokenMatch) {
-              const used = parseInt(tokenMatch[1], 10);
-              const total = parseInt(tokenMatch[2], 10);
-              contextInfo = {
-                used,
-                total,
-                percentage: Math.round((used / total) * 100)
-              };
-              break;
-            }
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      }
-
-      return contextInfo;
-    } catch (err) {
-      console.error(`[ClaudeRunner] Failed to get context for ${sessionId}:`, err.message);
-      return { used: 0, total: 200000, percentage: 0 };
-    }
+    return {
+      used: session.contextUsed || 0,
+      total: session.contextTotal || 200000,
+      percentage: session.contextPercentage || 0
+    };
   }
 
   /**
