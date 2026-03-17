@@ -73,14 +73,20 @@ class ChatSessionStore {
     return this.sessions[id];
   }
 
-  addMessage(id, role, content, toolUse = null) {
+  addMessage(id, role, content, toolUse = null, meta = {}) {
     if (!this.sessions[id]) return;
-    this.sessions[id].messages.push({
+    const msg = {
       role,
       content,
       toolUse,
       timestamp: new Date().toISOString()
-    });
+    };
+    // Add image metadata (don't store base64 data, just flags)
+    if (meta.hasImages) {
+      msg.hasImages = true;
+      msg.imageCount = meta.imageCount || 0;
+    }
+    this.sessions[id].messages.push(msg);
     this.sessions[id].messageCount = this.sessions[id].messages.length;
     this.sessions[id].lastActivity = new Date().toISOString();
     this._save();

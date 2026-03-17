@@ -88,7 +88,7 @@ function ChatHeader({
           className="h-8 px-2 rounded border border-slate-600 text-xs text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors flex items-center gap-1"
           title="Command Palette (Ctrl+K)"
         >
-          <span>&#x2315;</span>
+          <span>{'\u2315'}</span>
           <kbd className="hidden sm:inline text-xs">K</kbd>
         </button>
 

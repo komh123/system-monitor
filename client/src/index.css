@@ -61,7 +61,7 @@ input, select, textarea {
 }
 
 .card {
-  @apply bg-slate-800 rounded-xl p-3 sm:p-4 border border-slate-700;
+  @apply bg-slate-800 rounded-lg sm:rounded-xl p-3 sm:p-4 border border-slate-700;
 }
 
 .metric-value {
@@ -128,6 +128,31 @@ tr:hover {
 /* Safe area for mobile notch/home indicator */
 .safe-area-bottom {
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+/* Prose styles for chat markdown rendering */
+.prose-chat {
+  line-height: 1.5;
+}
+
+.prose-chat > *:first-child {
+  margin-top: 0;
+}
+
+.prose-chat > *:last-child {
+  margin-bottom: 0;
+}
+
+/* Scrollbar thin for image preview strip */
+.scrollbar-thin::-webkit-scrollbar {
+  height: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 2px;
 }
 
 /* Mobile-specific overrides */

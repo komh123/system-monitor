@@ -9,19 +9,28 @@ const DEFAULT_SYSTEM_PROMPT = `你是一個 agentic AI 助手。你的工作模�
 4. 回答使用繁體中文，除非用戶用其他語言提問。
 5. 回答要簡潔、有結構，善用 markdown 格式。`;
 
+/**
+ * ClaudeRunner — communicates with sdk-runner process on remote servers
+ * via SSH channel using NDJSON protocol over stdin (commands) / stderr (events).
+ *
+ * The SDK runner uses stderr for protocol because the Agent SDK internally
+ * captures stdout for its child process communication.
+ */
 class ClaudeRunner extends EventEmitter {
   constructor() {
     super();
-    this.activeProcesses = new Map();
+    this.activeProcesses = new Map(); // sessionId → { stream, requestId }
   }
 
   /**
    * Send a message to a Claude session and stream the response.
    * Returns an EventEmitter that emits: 'data' (SSE events), 'error', 'end'
+   *
    * @param {string} sessionId - Session ID
    * @param {string} content - Message content
    * @param {object} options - Optional parameters
-   * @param {string} options.mode - Mode (ask/plan/bypass), affects permission-mode
+   * @param {string} options.mode - Mode (ask/plan/bypass), affects permissionMode
+   * @param {Array} options.images - Optional image content blocks for multimodal
    */
   async sendMessage(sessionId, content, options = {}) {
     const store = getChatSessionStore();
@@ -31,22 +40,7 @@ class ClaudeRunner extends EventEmitter {
     const { serverIp, model, claudeSessionId, allowedTools, systemPrompt, mode: sessionMode } = session;
     const mode = options.mode || sessionMode || 'ask';
 
-    // Build claude command
-    // NOTE: --allowedTools is variadic and consumes all remaining positional args,
-    // so the message must come BEFORE it in the command line.
-    const args = ['-p'];
-
-    if (claudeSessionId) {
-      args.push('--resume', claudeSessionId);
-    }
-
-    args.push('--model', model);
-    args.push('--output-format', 'stream-json');
-    args.push('--verbose');
-
-    // Map mode to permission-mode
-    // Valid choices: acceptEdits, bypassPermissions, default, dontAsk, plan, auto
-    // ask → default, plan → plan, bypass → bypassPermissions
+    // Map mode to SDK permissionMode
     const permissionModeMap = {
       'ask': 'default',
       'plan': 'plan',
@@ -56,32 +50,46 @@ class ClaudeRunner extends EventEmitter {
       'dontAsk': 'dontAsk',
     };
     const permissionMode = permissionModeMap[mode] || 'default';
-    args.push('--permission-mode', permissionMode);
 
-    // Apply system prompt only on first message (before session ID exists)
+    // Build SDK query command
+    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const queryCmd = {
+      cmd: 'query',
+      id: requestId,
+      prompt: content,
+      options: {
+        model: model || 'sonnet',
+        cwd: '/home/ubuntu/agent-skill',
+        permissionMode,
+        allowedTools: allowedTools || ['Read', 'Edit', 'Bash', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+      }
+    };
+
+    // Include images for multimodal
+    if (options.images && options.images.length > 0) {
+      queryCmd.images = options.images;
+    }
+
+    // Resume existing session
+    if (claudeSessionId) {
+      queryCmd.options.resume = claudeSessionId;
+    }
+
+    // System prompt only on first message
     if (!claudeSessionId) {
-      const prompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
-      args.push('--system-prompt', JSON.stringify(prompt));
+      queryCmd.options.systemPrompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
     }
 
-    // Escape the user message for shell
-    const escapedContent = content.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
+    console.log(`[ClaudeRunner] Sending SDK query ${requestId} to ${serverIp} (model=${model}, resume=${!!claudeSessionId})`);
 
-    // Variadic args (--allowedTools) must come AFTER the message
-    const trailingArgs = [];
-    if (allowedTools && allowedTools.length > 0) {
-      trailingArgs.push('--allowedTools', allowedTools.join(','));
-    }
+    // Save user message (store image metadata but not base64 data)
+    const hasImages = !!(options.images && options.images.length > 0);
+    store.addMessage(sessionId, 'user', content, null, {
+      hasImages,
+      imageCount: hasImages ? options.images.length : 0
+    });
 
-    const claudePath = await this._detectClaudePath(serverIp);
-    const fullCommand = `cd /home/ubuntu/agent-skill && ${claudePath} ${args.join(' ')} "${escapedContent}" ${trailingArgs.join(' ')}`;
-
-    console.log(`[ClaudeRunner] Executing on ${serverIp}: ${claudePath} ${args.join(' ')} '<message>'`);
-
-    // Save user message
-    store.addMessage(sessionId, 'user', content);
-
-    // Execute via SSH and stream output
     const emitter = new EventEmitter();
 
     try {
@@ -93,140 +101,83 @@ class ClaudeRunner extends EventEmitter {
 
       const client = connection.client;
 
-      client.exec(fullCommand, {}, (err, stream) => {
+      // Launch sdk-runner process via SSH exec
+      const sdkRunnerCmd = 'cd /home/ubuntu/agent-skill/sdk-runner && node index.js';
+
+      client.exec(sdkRunnerCmd, {}, (err, stream) => {
         if (err) {
           emitter.emit('error', err);
           return;
         }
 
         let fullResponse = '';
-        let extractedSessionId = null;
-        let buffer = '';
+        let stderrBuffer = '';
 
-        stream.on('data', (data) => {
-          buffer += data.toString();
+        // Store reference for cancellation
+        this.activeProcesses.set(sessionId, { stream, requestId });
+
+        // Send the query command via stdin, then close stdin to signal no more commands
+        const cmdJson = JSON.stringify(queryCmd) + '\n';
+        stream.write(cmdJson);
+        stream.end(); // Close stdin — sdk-runner will finish the query then exit
+
+        // Protocol events come from STDERR (SDK captures stdout)
+        stream.stderr.on('data', (data) => {
+          stderrBuffer += data.toString();
 
           // Process complete lines
-          const lines = buffer.split('\n');
-          buffer = lines.pop();
+          const lines = stderrBuffer.split('\n');
+          stderrBuffer = lines.pop(); // Keep incomplete line in buffer
 
           for (const line of lines) {
             if (!line.trim()) continue;
 
+            // Debug log lines start with [LOG]
+            if (line.startsWith('[LOG]')) {
+              console.log(`[SdkRunner:${serverIp}] ${line}`);
+              continue;
+            }
+
             try {
-              const parsed = JSON.parse(line);
-              // Extract Claude session ID from the first response
-              if (parsed.session_id && !extractedSessionId) {
-                extractedSessionId = parsed.session_id;
-                store.update(sessionId, {
-                  claudeSessionId: extractedSessionId,
-                  status: 'running'
-                });
+              const event = JSON.parse(line);
+
+              // Only process events for our request
+              if (event.id !== requestId) continue;
+
+              this._handleSdkEvent(event, sessionId, emitter, { fullResponse: { value: fullResponse }, store });
+              // Update fullResponse from closure
+              if (event.event === 'text' && event.data) {
+                fullResponse += event.data;
               }
-
-              // Map stream-json events to our SSE format
-              if (parsed.type === 'assistant' && parsed.message) {
-                const textBlocks = (parsed.message.content || [])
-                  .filter(b => b.type === 'text')
-                  .map(b => b.text)
-                  .join('');
-                if (textBlocks) {
-                  fullResponse += textBlocks;
-                  emitter.emit('data', {
-                    event: 'assistant_text',
-                    data: { text: textBlocks }
-                  });
-                }
-
-                const toolBlocks = (parsed.message.content || [])
-                  .filter(b => b.type === 'tool_use');
-                for (const tool of toolBlocks) {
-                  emitter.emit('data', {
-                    event: 'tool_use',
-                    data: { tool: tool.name, input: tool.input, id: tool.id }
-                  });
-                }
-              }
-
-              if (parsed.type === 'content_block_delta') {
-                if (parsed.delta?.type === 'text_delta') {
-                  fullResponse += parsed.delta.text;
-                  emitter.emit('data', {
-                    event: 'assistant_text',
-                    data: { text: parsed.delta.text }
-                  });
-                }
-              }
-
-              if (parsed.type === 'result') {
-                if (parsed.session_id) {
-                  store.update(sessionId, {
-                    claudeSessionId: parsed.session_id,
-                    status: 'running'
-                  });
-                }
-                // Extract token usage from result for context tracking (avoids extra SSH exec)
-                const inputTokens = parsed.usage?.input_tokens || parsed.input_tokens || 0;
-                const outputTokens = parsed.usage?.output_tokens || parsed.output_tokens || 0;
-                const totalTokens = inputTokens + outputTokens;
-                const maxTokens = 200000;
-                if (totalTokens > 0) {
-                  store.update(sessionId, {
-                    contextUsed: totalTokens,
-                    contextTotal: maxTokens,
-                    contextPercentage: Math.round((totalTokens / maxTokens) * 100)
-                  });
-                }
-                emitter.emit('data', {
-                  event: 'result',
-                  data: {
-                    sessionId: parsed.session_id,
-                    costUsd: parsed.cost_usd,
-                    durationMs: parsed.duration_ms,
-                    numTurns: parsed.num_turns,
-                    contextUsed: totalTokens,
-                    contextTotal: maxTokens
-                  }
-                });
-              }
-
             } catch (parseErr) {
-              // Not JSON, might be raw text output
+              // Not JSON protocol line — log it
               if (line.trim()) {
-                fullResponse += line;
-                emitter.emit('data', {
-                  event: 'assistant_text',
-                  data: { text: line }
-                });
+                console.log(`[SdkRunner:${serverIp}] Non-JSON: ${line.substring(0, 200)}`);
               }
             }
           }
         });
 
-        stream.stderr.on('data', (data) => {
-          const errText = data.toString();
-          console.error(`[ClaudeRunner] stderr: ${errText}`);
-          if (errText.includes('Error') || errText.includes('error')) {
-            emitter.emit('data', {
-              event: 'error',
-              data: { message: errText.trim() }
-            });
-          }
+        // stdout — the SDK may write here, we ignore it for protocol purposes
+        stream.on('data', (data) => {
+          // SDK internal communication — ignore
         });
 
         stream.on('close', (code) => {
-          // Process remaining buffer
-          if (buffer.trim()) {
-            try {
-              const parsed = JSON.parse(buffer);
-              if (parsed.type === 'result' && parsed.session_id) {
-                store.update(sessionId, {
-                  claudeSessionId: parsed.session_id,
-                  status: 'running'
-                });
-              }
-            } catch {
-              // Ignore
+          // Process remaining stderr buffer
+          if (stderrBuffer.trim()) {
+            const remainingLines = stderrBuffer.split('\n');
+            for (const line of remainingLines) {
+              if (!line.trim() || line.startsWith('[LOG]')) continue;
+              try {
+                const event = JSON.parse(line);
+                if (event.id === requestId) {
+                  this._handleSdkEvent(event, sessionId, emitter, { fullResponse: { value: fullResponse }, store });
+                  if (event.event === 'text' && event.data) {
+                    fullResponse += event.data;
+                  }
+                }
+              } catch { /* ignore */ }
             }
           }
 
@@ -237,15 +188,15 @@ class ClaudeRunner extends EventEmitter {
 
           store.update(sessionId, { lastActivity: new Date().toISOString() });
 
+          // Emit done if not already emitted by sdk-runner
           emitter.emit('data', {
             event: 'done',
             data: { exitCode: code, messageCount: store.get(sessionId)?.messageCount }
           });
           emitter.emit('end');
-        });
 
-        // Store reference to stream for potential cancellation
-        this.activeProcesses.set(sessionId, { stream, pid: null });
+          this.activeProcesses.delete(sessionId);
+        });
       });
 
     } catch (err) {
@@ -255,14 +206,165 @@ class ClaudeRunner extends EventEmitter {
     return emitter;
   }
 
+  /**
+   * Handle a single SDK runner event and map to SSE events
+   */
+  _handleSdkEvent(event, sessionId, emitter, ctx) {
+    const store = ctx.store;
+
+    switch (event.event) {
+      case 'init': {
+        // SDK session initialized — store claude session ID
+        if (event.sessionId) {
+          store.update(sessionId, {
+            claudeSessionId: event.sessionId,
+            status: 'running'
+          });
+        }
+        break;
+      }
+
+      case 'text': {
+        // Streaming text chunk
+        if (event.data) {
+          emitter.emit('data', {
+            event: 'assistant_text',
+            data: { text: event.data }
+          });
+        }
+        break;
+      }
+
+      case 'tool_use': {
+        // Tool invocation
+        if (event.data) {
+          emitter.emit('data', {
+            event: 'tool_use',
+            data: event.data
+          });
+        }
+        break;
+      }
+
+      case 'tool_progress': {
+        // Tool execution progress
+        if (event.data) {
+          emitter.emit('data', {
+            event: 'tool_progress',
+            data: event.data
+          });
+        }
+        break;
+      }
+
+      case 'tool_summary': {
+        // Tool result summary
+        if (event.data) {
+          emitter.emit('data', {
+            event: 'tool_summary',
+            data: event.data
+          });
+        }
+        break;
+      }
+
+      case 'result': {
+        // Final result with usage stats
+        const resultData = event.data || {};
+
+        if (resultData.sessionId) {
+          store.update(sessionId, {
+            claudeSessionId: resultData.sessionId,
+            status: 'running'
+          });
+        }
+
+        const contextUsed = resultData.contextUsed || 0;
+        const contextTotal = resultData.contextTotal || 200000;
+
+        if (contextUsed > 0) {
+          store.update(sessionId, {
+            contextUsed,
+            contextTotal,
+            contextPercentage: Math.round((contextUsed / contextTotal) * 100)
+          });
+        }
+
+        emitter.emit('data', {
+          event: 'result',
+          data: {
+            sessionId: resultData.sessionId,
+            costUsd: resultData.costUsd,
+            durationMs: resultData.durationMs,
+            numTurns: resultData.numTurns,
+            contextUsed,
+            contextTotal,
+            isError: resultData.isError
+          }
+        });
+        break;
+      }
+
+      case 'rate_limit': {
+        // Rate limit info
+        if (event.data) {
+          emitter.emit('data', {
+            event: 'rate_limit',
+            data: event.data
+          });
+        }
+        break;
+      }
+
+      case 'status': {
+        // Status updates (retrying, etc.)
+        emitter.emit('data', {
+          event: 'status',
+          data: event
+        });
+        break;
+      }
+
+      case 'error': {
+        emitter.emit('data', {
+          event: 'error',
+          data: { message: event.error || 'Unknown error' }
+        });
+        break;
+      }
+
+      case 'done': {
+        // SDK runner signals query complete — don't emit SSE done here,
+        // wait for stream close to ensure we've collected all data
+        break;
+      }
+
+      case 'pong': {
+        // Health check response — handled separately
+        break;
+      }
+
+      // Ignore: interrupted, aborted (handled by stopSession)
+      default:
+        break;
+    }
+  }
+
+  /**
+   * Stop a running session by closing the SSH stream
+   */
   async stopSession(sessionId) {
     const active = this.activeProcesses.get(sessionId);
     if (active?.stream) {
+      // Send SIGINT to the sdk-runner process
       active.stream.signal('SIGINT');
       this.activeProcesses.delete(sessionId);
     }
   }
 
+  /**
+   * Check if Claude process is alive on the remote server
+   */
   async checkHealth(sessionId) {
     const store = getChatSessionStore();
     const session = store.get(sessionId);
@@ -270,6 +372,7 @@ class ClaudeRunner extends EventEmitter {
 
     try {
       const sshPool = getSSHPool();
+      // Check if node/claude processes are running
       await sshPool.exec(session.serverIp, 'pgrep -f "claude"', { timeout: 5000 });
       return { alive: true };
     } catch {
@@ -294,76 +397,96 @@ class ClaudeRunner extends EventEmitter {
   }
 
   /**
-   * Compact a session's context by executing /compact command
-   * Returns the compaction result message or error
+   * Compact a session's context by sending /compact through sdk-runner
    */
   async compact(sessionId) {
     const store = getChatSessionStore();
     const session = store.get(sessionId);
     if (!session) throw new Error('Session not found');
 
-    const { serverIp, claudeSessionId } = session;
+    const { serverIp, claudeSessionId, model, allowedTools } = session;
     if (!claudeSessionId) {
       throw new Error('Cannot compact: No active Claude session');
     }
 
+    console.log(`[ClaudeRunner] Compacting session ${sessionId} on ${serverIp}`);
+
     try {
-      const claudePath = await this._detectClaudePath(serverIp);
-      const command = `cd /home/ubuntu/agent-skill && ${claudePath} -p --resume ${claudeSessionId} --output-format stream-json '/compact'`;
-
-      console.log(`[ClaudeRunner] Compacting session ${sessionId} on ${serverIp}`);
-
       const pool = getSSHPool();
-      const output = await pool.exec(serverIp, command, { timeout: 30000 });
-
-      // Parse the stream-json output to extract compact result
-      const lines = output.split('\n').filter(line => line.trim());
-      let resultMessage = 'Context compacted successfully';
-
-      for (const line of lines) {
-        try {
-          const parsed = JSON.parse(line);
-
-          // Extract assistant response about compaction
-          if (parsed.type === 'assistant' && parsed.message?.content) {
-            const textBlocks = parsed.message.content
-              .filter(b => b.type === 'text')
-              .map(b => b.text)
-              .join('');
-
-            if (textBlocks.trim()) {
-              resultMessage = textBlocks.trim();
-              break;
-            }
-          }
-        } catch {
-          // Ignore parse errors
-        }
+      const connection = pool.connections?.get(serverIp);
+      if (!connection || connection.status !== 'connected') {
+        throw new Error(`No active SSH connection to ${serverIp}`);
       }
 
-      // Add system message to session history
-      store.addMessage(sessionId, 'assistant', resultMessage);
+      const client = connection.client;
+      const requestId = `compact-${Date.now()}`;
 
-      return { success: true, message: resultMessage };
+      const queryCmd = {
+        cmd: 'query',
+        id: requestId,
+        prompt: '/compact',
+        options: {
+          model: model || 'sonnet',
+          cwd: '/home/ubuntu/agent-skill',
+          permissionMode: 'bypassPermissions',
+          allowedTools: allowedTools || ['Read', 'Edit', 'Bash', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+          resume: claudeSessionId,
+        }
+      };
+
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Compact timeout (60s)'));
+        }, 60000);
+
+        client.exec('cd /home/ubuntu/agent-skill/sdk-runner && node index.js', {}, (err, stream) => {
+          if (err) {
+            clearTimeout(timeout);
+            return reject(err);
+          }
+
+          let resultMessage = 'Context compacted successfully';
+          let stderrBuffer = '';
+
+          // Send compact command
+          stream.write(JSON.stringify(queryCmd) + '\n');
+          stream.end();
+
+          stream.stderr.on('data', (data) => {
+            stderrBuffer += data.toString();
+            const lines = stderrBuffer.split('\n');
+            stderrBuffer = lines.pop();
+
+            for (const line of lines) {
+              if (!line.trim() || line.startsWith('[LOG]')) continue;
+              try {
+                const event = JSON.parse(line);
+                if (event.id !== requestId) continue;
+
+                if (event.event === 'text' && event.data) {
+                  resultMessage = event.data;
+                }
+                if (event.event === 'result' && event.data?.sessionId) {
+                  store.update(sessionId, {
+                    claudeSessionId: event.data.sessionId,
+                  });
+                }
+              } catch { /* ignore */ }
+            }
+          });
+
+          stream.on('data', () => { /* ignore stdout */ });
+
+          stream.on('close', () => {
+            clearTimeout(timeout);
+            store.addMessage(sessionId, 'assistant', resultMessage);
+            resolve({ success: true, message: resultMessage });
+          });
+        });
+      });
     } catch (err) {
       console.error(`[ClaudeRunner] Failed to compact ${sessionId}:`, err.message);
       throw new Error(`Compact failed: ${err.message}`);
-    }
-  }
-
-  async _detectClaudePath(ip) {
-    const sshPool = getSSHPool();
-    try {
-      const result = await sshPool.exec(ip, 'which claude', { timeout: 5000 });
-      return result.trim();
-    } catch {
-      for (const p of ['/home/ubuntu/.local/bin/claude', '/usr/local/bin/claude']) {
-        try {
-          await sshPool.exec(ip, `test -f ${p}`, { timeout: 3000 });
-          return p;
-        } catch { /* continue */ }
-      }
-      return 'claude';
     }
   }
 }

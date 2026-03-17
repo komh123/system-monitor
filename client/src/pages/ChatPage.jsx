@@ -131,8 +131,8 @@ function ChatPage() {
     }
   };
 
-  // Send message
-  const handleSend = async (content) => {
+  // Send message (with optional images)
+  const handleSend = async (content, images) => {
     if (!activeSessionId || isStreaming) return;
 
     // Handle refresh-skills command
@@ -141,16 +141,27 @@ function ChatPage() {
       return;
     }
 
-    const userMsg = { role: 'user', content, timestamp: new Date().toISOString() };
+    const userMsg = {
+      role: 'user',
+      content,
+      timestamp: new Date().toISOString(),
+      hasImages: !!(images && images.length > 0),
+      imageCount: images?.length || 0
+    };
     setMessages(prev => [...prev, userMsg]);
     setIsStreaming(true);
     setStreamingText('');
 
     try {
+      const body = { content, mode };
+      if (images && images.length > 0) {
+        body.images = images;
+      }
+
       const res = await fetch(`${API_BASE}/sessions/${activeSessionId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, mode })
+        body: JSON.stringify(body)
       });
 
       const reader = res.body.getReader();
@@ -370,7 +381,7 @@ function ChatPage() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-7.5rem)] sm:h-[calc(100dvh-7rem)] -mx-2 sm:-mx-4 md:-mx-6 -mb-2 sm:-mb-4 md:-mb-6 bg-slate-900 rounded-lg overflow-hidden border border-slate-700">
+    <div className="flex h-[calc(100dvh-5.5rem)] sm:h-[calc(100dvh-7rem)] -mx-2 sm:-mx-4 md:-mx-6 -mb-20 sm:-mb-4 md:-mb-6 bg-slate-900 rounded-none sm:rounded-lg overflow-hidden border-0 sm:border border-slate-700">
       {/* Session Drawer */}
       <SessionDrawer
         open={drawerOpen}
@@ -417,7 +428,7 @@ function ChatPage() {
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
-            <div className="text-5xl mb-4">&#x1F4AC;</div>
+            <div className="text-5xl mb-4">{'\uD83D\uDCAC'}</div>
             <p className="text-slate-400 text-sm mb-4">Select a session or create a new one</p>
             <button
               onClick={() => setShowNewModal(true)}

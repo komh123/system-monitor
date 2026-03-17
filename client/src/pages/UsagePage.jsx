@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import FullscreenChart from '../components/FullscreenChart.jsx';
 
 const API_BASE = '/api/usage';
 
@@ -238,32 +239,36 @@ function UsagePage() {
         </div>
       </div>
 
-      {/* Circular Gauges */}
-      <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 justify-items-center">
+      {/* Circular Gauges — 2 col mobile (smaller gauges), 4 col desktop */}
+      <div className="bg-slate-800 rounded-xl p-3 sm:p-6 border border-slate-700">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-6 justify-items-center">
           <CircularGauge
             value={usage?.session?.utilization || 0}
             label="Current Session"
             sublabel="5-hour window"
             resetsAt={usage?.session?.resetsAt}
+            size={typeof window !== 'undefined' && window.innerWidth < 640 ? 100 : 140}
           />
           <CircularGauge
             value={usage?.weekly?.utilization || 0}
             label="All Models"
             sublabel="7-day window"
             resetsAt={usage?.weekly?.resetsAt}
+            size={typeof window !== 'undefined' && window.innerWidth < 640 ? 100 : 140}
           />
           <CircularGauge
             value={usage?.sonnet?.utilization || 0}
             label="Sonnet"
             sublabel="Weekly limit"
             resetsAt={usage?.sonnet?.resetsAt}
+            size={typeof window !== 'undefined' && window.innerWidth < 640 ? 100 : 140}
           />
           <CircularGauge
             value={usage?.opus?.utilization || 0}
             label="Opus"
             sublabel="Weekly limit"
             resetsAt={usage?.opus?.resetsAt}
+            size={typeof window !== 'undefined' && window.innerWidth < 640 ? 100 : 140}
           />
         </div>
       </div>
@@ -316,7 +321,7 @@ function UsagePage() {
               ))}
             </div>
           </div>
-          <div className="h-64">
+          <FullscreenChart title="Usage History" height="h-44 sm:h-64">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={history}>
                 <defs>
@@ -338,46 +343,23 @@ function UsagePage() {
                   dataKey="timestamp"
                   tickFormatter={formatHistoryTime}
                   stroke="#64748b"
-                  fontSize={11}
+                  fontSize={10}
                 />
                 <YAxis
                   domain={[0, 100]}
                   stroke="#64748b"
-                  fontSize={11}
+                  fontSize={10}
+                  width={35}
                   tickFormatter={v => `${v}%`}
                 />
                 <Tooltip content={<ChartTooltip />} />
-                <ReferenceLine y={80} stroke="#ef4444" strokeDasharray="4 4" label={{ value: '80%', fill: '#ef4444', fontSize: 10 }} />
-                <Area
-                  type="monotone"
-                  dataKey="session"
-                  name="Session"
-                  stroke="#3b82f6"
-                  fill="url(#colorSession)"
-                  strokeWidth={2}
-                  dot={false}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="weekly"
-                  name="Weekly"
-                  stroke="#8b5cf6"
-                  fill="url(#colorWeekly)"
-                  strokeWidth={2}
-                  dot={false}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="sonnet"
-                  name="Sonnet"
-                  stroke="#06b6d4"
-                  fill="url(#colorSonnet)"
-                  strokeWidth={2}
-                  dot={false}
-                />
+                <ReferenceLine y={80} stroke="#ef4444" strokeDasharray="4 4" label={{ value: '80%', fill: '#ef4444', fontSize: 9 }} />
+                <Area type="monotone" dataKey="session" name="Session" stroke="#3b82f6" fill="url(#colorSession)" strokeWidth={2} dot={false} />
+                <Area type="monotone" dataKey="weekly" name="Weekly" stroke="#8b5cf6" fill="url(#colorWeekly)" strokeWidth={2} dot={false} />
+                <Area type="monotone" dataKey="sonnet" name="Sonnet" stroke="#06b6d4" fill="url(#colorSonnet)" strokeWidth={2} dot={false} />
               </AreaChart>
             </ResponsiveContainer>
-          </div>
+          </FullscreenChart>
         </div>
       )}
 

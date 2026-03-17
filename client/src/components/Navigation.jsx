@@ -62,9 +62,9 @@ function Navigation() {
                   ? 'text-blue-400 bg-blue-600/10'
                   : 'text-slate-400 active:bg-slate-700'
               }`}
-              style={{ minHeight: '52px' }}
+              style={{ minHeight: '48px' }}
             >
-              <span className="text-lg leading-none">{item.icon}</span>
+              <span className="text-base leading-none">{item.icon}</span>
               <span className={`text-[10px] font-medium leading-none ${
                 location.pathname === item.path ? 'text-blue-400' : 'text-slate-500'
               }`}>{item.label}</span>
@@ -73,9 +73,9 @@ function Navigation() {
           <button
             onClick={handleLogout}
             className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-slate-400 active:bg-red-600/20 transition-colors btn-inline"
-            style={{ minHeight: '52px' }}
+            style={{ minHeight: '48px' }}
           >
-            <span className="text-lg leading-none">🚪</span>
+            <span className="text-base leading-none">🚪</span>
             <span className="text-[10px] font-medium leading-none text-slate-500">Logout</span>
           </button>
         </div>

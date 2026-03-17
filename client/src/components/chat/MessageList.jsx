@@ -1,4 +1,8 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import MessageBubble from './MessageBubble.jsx';
 
 function MessageList({ messages, streamingText, onRefresh }) {
@@ -91,12 +95,40 @@ function MessageList({ messages, streamingText, onRefresh }) {
         <MessageBubble key={i} message={msg} />
       ))}
 
-      {/* Streaming indicator */}
+      {/* Streaming indicator with markdown rendering */}
       {streamingText !== null && (
         <div className="flex justify-start mb-3">
-          <div className="max-w-[92%] sm:max-w-[75%] bg-slate-800 text-slate-200 rounded-2xl rounded-bl-md border border-slate-700 px-3.5 py-2.5">
-            <div className="text-sm whitespace-pre-wrap break-words">
-              {streamingText || (
+          <div className="max-w-full w-full sm:max-w-[85%] sm:w-auto bg-slate-800 text-slate-200 rounded-2xl rounded-bl-md border border-slate-700 px-3 py-2.5 sm:px-3.5 sm:mr-auto">
+            <div className="text-sm break-words overflow-hidden">
+              {streamingText ? (
+                <div className="prose-chat">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      code({ node, inline, className, children, ...props }) {
+                        const match = /language-(\w+)/.exec(className || '');
+                        const lang = match ? match[1] : '';
+                        const codeString = String(children).replace(/\n$/, '');
+                        if (!inline && (lang || codeString.includes('\n'))) {
+                          return (
+                            <div className="relative my-2">
+                              {lang && <div className="text-[10px] text-slate-500 bg-slate-900/50 px-2 py-0.5 rounded-t border-b border-slate-700/50 font-mono">{lang}</div>}
+                              <SyntaxHighlighter style={oneDark} language={lang || 'text'} PreTag="div" customStyle={{ margin: 0, borderRadius: lang ? '0 0 0.5rem 0.5rem' : '0.5rem', fontSize: '0.8rem', padding: '0.75rem' }} {...props}>{codeString}</SyntaxHighlighter>
+                            </div>
+                          );
+                        }
+                        return <code className="bg-slate-700/60 px-1 py-0.5 rounded text-[0.85em] text-pink-300" {...props}>{children}</code>;
+                      },
+                      a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">{children}</a>; },
+                      p({ children }) { return <p className="my-1">{children}</p>; },
+                      ul({ children }) { return <ul className="list-disc list-inside space-y-0.5 my-1">{children}</ul>; },
+                      ol({ children }) { return <ol className="list-decimal list-inside space-y-0.5 my-1">{children}</ol>; },
+                    }}
+                  >
+                    {streamingText}
+                  </ReactMarkdown>
+                </div>
+              ) : (
                 <span className="inline-flex gap-1 text-slate-400">
                   <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
                   <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>

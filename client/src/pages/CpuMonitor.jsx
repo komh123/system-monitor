@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
+import FullscreenChart from '../components/FullscreenChart.jsx';
 
 const API_BASE = '/api';
 
@@ -263,75 +264,61 @@ function CpuHistoryChart({ data, warningThreshold, killThreshold }) {
     );
   }
 
+  const chartContent = (
+    <ResponsiveContainer width="100%" height="100%">
+      <LineChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+        <XAxis
+          dataKey="time"
+          stroke="#94a3b8"
+          style={{ fontSize: '11px' }}
+          interval="preserveStartEnd"
+        />
+        <YAxis
+          stroke="#94a3b8"
+          style={{ fontSize: '11px' }}
+          domain={[0, 100]}
+          width={35}
+          tickFormatter={v => `${v}%`}
+        />
+        <Tooltip
+          contentStyle={{
+            backgroundColor: '#1e293b',
+            border: '1px solid #475569',
+            borderRadius: '6px',
+            fontSize: '12px'
+          }}
+          labelStyle={{ color: '#cbd5e1' }}
+        />
+        <Legend
+          wrapperStyle={{ fontSize: '11px' }}
+          iconType="line"
+        />
+        <ReferenceLine
+          y={warningThreshold}
+          stroke="#eab308"
+          strokeDasharray="3 3"
+          label={{ value: `Warn ${warningThreshold}%`, position: 'right', fill: '#eab308', fontSize: 9 }}
+        />
+        <ReferenceLine
+          y={killThreshold}
+          stroke="#ef4444"
+          strokeDasharray="3 3"
+          label={{ value: `Crit ${killThreshold}%`, position: 'right', fill: '#ef4444', fontSize: 9 }}
+        />
+        <Line type="monotone" dataKey="cpu" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} name="CPU %" />
+        <Line type="monotone" dataKey="pressure" stroke="#10b981" strokeWidth={2} dot={{ r: 1.5 }} name="Pressure %" />
+        <Line type="monotone" dataKey="load1" stroke="#8b5cf6" strokeWidth={1.5} dot={false} name="Load (1m)" />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+
   return (
     <div className="card">
-      <h2 className="text-sm sm:text-lg font-semibold mb-3 sm:mb-4">CPU History (10 min)</h2>
-      <ResponsiveContainer width="100%" height={160}>
-        <LineChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-          <XAxis
-            dataKey="time"
-            stroke="#94a3b8"
-            style={{ fontSize: '12px' }}
-            interval="preserveStartEnd"
-          />
-          <YAxis
-            stroke="#94a3b8"
-            style={{ fontSize: '12px' }}
-            domain={[0, 100]}
-            label={{ value: '%', angle: -90, position: 'insideLeft', style: { fill: '#94a3b8' } }}
-          />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: '#1e293b',
-              border: '1px solid #475569',
-              borderRadius: '6px',
-              fontSize: '12px'
-            }}
-            labelStyle={{ color: '#cbd5e1' }}
-          />
-          <Legend
-            wrapperStyle={{ fontSize: '12px' }}
-            iconType="line"
-          />
-          <ReferenceLine
-            y={warningThreshold}
-            stroke="#eab308"
-            strokeDasharray="3 3"
-            label={{ value: `Warning ${warningThreshold}%`, position: 'right', fill: '#eab308', fontSize: 10 }}
-          />
-          <ReferenceLine
-            y={killThreshold}
-            stroke="#ef4444"
-            strokeDasharray="3 3"
-            label={{ value: `Critical ${killThreshold}%`, position: 'right', fill: '#ef4444', fontSize: 10 }}
-          />
-          <Line
-            type="monotone"
-            dataKey="cpu"
-            stroke="#3b82f6"
-            strokeWidth={2}
-            dot={{ r: 3 }}
-            name="CPU %"
-          />
-          <Line
-            type="monotone"
-            dataKey="pressure"
-            stroke="#10b981"
-            strokeWidth={2}
-            dot={{ r: 2 }}
-            name="CPU Pressure %"
-          />
-          <Line
-            type="monotone"
-            dataKey="load1"
-            stroke="#8b5cf6"
-            strokeWidth={1.5}
-            dot={false}
-            name="Load Avg (1m)"
-          />
-        </LineChart>
-      </ResponsiveContainer>
+      <h2 className="text-sm sm:text-lg font-semibold mb-2 sm:mb-4">CPU History (10 min)</h2>
+      <FullscreenChart title="CPU History (10 min)" height="h-40 sm:h-56">
+        {chartContent}
+      </FullscreenChart>
     </div>
   );
 }
@@ -1069,8 +1056,8 @@ function CpuMonitor() {
 
       {metrics && (
         <div className="grid gap-4 md:gap-6">
-          {/* Top Row - System Metrics */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 sm:gap-4">
+          {/* Top Row - System Metrics: 1 col mobile, 2 col sm, 3 col md */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 sm:gap-4">
             <CpuCard data={metrics.cpu || {}} />
             <MemoryCard data={metrics.memory || {}} />
             <ClaudeBuddyCard

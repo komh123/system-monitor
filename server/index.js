@@ -98,7 +98,7 @@ async function sendCpuAlert(pid, cpu, threshold) {
 }
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '20mb' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/usage', usageRoutes);

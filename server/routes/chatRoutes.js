@@ -472,9 +472,13 @@ router.post('/sessions/:id/compact', async (req, res) => {
 });
 
 // POST /api/chat/sessions/:id/message — SSE streaming response
+// Accepts: { content: string, mode?: string, images?: Array<ImageContentBlock> }
+// Images format: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "..." } }]
 router.post('/sessions/:id/message', async (req, res) => {
-  const { content, mode } = req.body;
-  if (!content) return res.status(400).json({ error: 'content is required' });
+  const { content, mode, images } = req.body;
+  if (!content && (!images || images.length === 0)) {
+    return res.status(400).json({ error: 'content or images is required' });
+  }
 
   const store = getChatSessionStore();
   const session = store.get(req.params.id);
@@ -494,7 +498,7 @@ router.post('/sessions/:id/message', async (req, res) => {
 
   try {
     const runner = getClaudeRunner();
-    const emitter = await runner.sendMessage(req.params.id, content, { mode });
+    const emitter = await runner.sendMessage(req.params.id, content || '', { mode, images });
 
     emitter.on('data', (event) => {
       res.write(`event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
