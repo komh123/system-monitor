@@ -102,11 +102,11 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
                         <>
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-sm font-medium truncate">{s.sessionName}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES.sonnet}`}>
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES.sonnet}`}>
                               {s.model}
                             </span>
                           </div>
-                          <div className="flex items-center justify-between text-[10px] text-slate-500">
+                          <div className="flex items-center justify-between text-xs text-slate-500">
                             <span>{s.messageCount} msgs</span>
                             <span>{new Date(s.lastActivity).toLocaleDateString()}</span>
                           </div>
@@ -116,11 +116,11 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
                       <div className="sm:hidden">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-sm font-medium truncate">{s.sessionName}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES.sonnet}`}>
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES.sonnet}`}>
                             {s.model}
                           </span>
                         </div>
-                        <div className="flex items-center justify-between text-[10px] text-slate-500">
+                        <div className="flex items-center justify-between text-xs text-slate-500">
                           <span>{s.messageCount} msgs</span>
                           <span>{new Date(s.lastActivity).toLocaleDateString()}</span>
                         </div>
@@ -129,8 +129,9 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
                     {onDelete && !collapsed && (
                       <button
                         onClick={(e) => { e.stopPropagation(); onDelete(s.id); }}
-                        className="w-10 flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition-colors"
+                        className="w-11 flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition-colors"
                         title="Delete session"
+                        style={{ minHeight: '44px' }}
                       >
                         🗑️
                       </button>

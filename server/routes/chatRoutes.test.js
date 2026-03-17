@@ -32,7 +32,7 @@ describe('Chat API - Commands', () => {
       expect(compactCommand).toMatchObject({
         id: 'compact',
         name: '/compact',
-        description: 'Compress conversation context',
+        description: 'Compress conversation context (~70% token reduction)',
         category: 'session'
       });
 
@@ -41,7 +41,7 @@ describe('Chat API - Commands', () => {
       expect(costCommand).toMatchObject({
         id: 'cost',
         name: '/cost',
-        description: 'Show API usage costs',
+        description: 'Show API usage costs for this session',
         category: 'session'
       });
 
@@ -50,7 +50,7 @@ describe('Chat API - Commands', () => {
       expect(contextCommand).toMatchObject({
         id: 'context',
         name: '/context',
-        description: 'Show context window usage',
+        description: 'Show context window token usage',
         category: 'session'
       });
 
@@ -59,7 +59,7 @@ describe('Chat API - Commands', () => {
       expect(clearCommand).toMatchObject({
         id: 'clear',
         name: '/clear',
-        description: 'Clear conversation',
+        description: 'Clear conversation and start fresh',
         category: 'session'
       });
     });

@@ -17,12 +17,12 @@ function ToolCard({ tool, input, output }) {
         <span>{toolIcons[tool] || '🔧'}</span>
         <span className="font-medium text-slate-300">{tool}</span>
         {input?.file_path && (
-          <span className="text-slate-500 truncate flex-1 font-mono text-[10px] sm:text-xs">
+          <span className="text-slate-500 truncate flex-1 font-mono text-[11px] sm:text-xs">
             {input.file_path.split('/').pop()}
           </span>
         )}
         {input?.command && (
-          <span className="text-slate-500 truncate flex-1 font-mono text-[10px] sm:text-xs">
+          <span className="text-slate-500 truncate flex-1 font-mono text-[11px] sm:text-xs">
             $ {input.command.substring(0, 40)}
           </span>
         )}
@@ -30,7 +30,7 @@ function ToolCard({ tool, input, output }) {
       </button>
       {expanded && output && (
         <div className="px-3 py-2 bg-slate-900/50 border-t border-slate-700 max-h-48 overflow-y-auto">
-          <pre className="text-[10px] sm:text-xs text-slate-400 font-mono whitespace-pre-wrap break-all">
+          <pre className="text-[11px] sm:text-xs text-slate-400 font-mono whitespace-pre-wrap break-all">
             {typeof output === 'string' ? output : JSON.stringify(output, null, 2)}
           </pre>
         </div>

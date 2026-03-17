@@ -31,7 +31,7 @@ describe('MessageInput - Command Autocomplete', () => {
     const user = userEvent.setup();
     render(<MessageInput onSend={mockOnSend} disabled={false} onStop={mockOnStop} isStreaming={false} />);
 
-    const textarea = screen.getByPlaceholderText('Type a message...');
+    const textarea = screen.getByPlaceholderText('Type a message or / for commands...');
     await user.type(textarea, '/');
 
     // Should show autocomplete dropdown
@@ -47,7 +47,7 @@ describe('MessageInput - Command Autocomplete', () => {
     const user = userEvent.setup();
     render(<MessageInput onSend={mockOnSend} disabled={false} onStop={mockOnStop} isStreaming={false} />);
 
-    const textarea = screen.getByPlaceholderText('Type a message...');
+    const textarea = screen.getByPlaceholderText('Type a message or / for commands...');
     await user.type(textarea, '/co');
 
     // Should only show commands starting with "/co"
@@ -63,7 +63,7 @@ describe('MessageInput - Command Autocomplete', () => {
     const user = userEvent.setup();
     render(<MessageInput onSend={mockOnSend} disabled={false} onStop={mockOnStop} isStreaming={false} />);
 
-    const textarea = screen.getByPlaceholderText('Type a message...');
+    const textarea = screen.getByPlaceholderText('Type a message or / for commands...');
     await user.type(textarea, '/');
 
     await waitFor(() => {
@@ -86,7 +86,7 @@ describe('MessageInput - Command Autocomplete', () => {
     const user = userEvent.setup();
     render(<MessageInput onSend={mockOnSend} disabled={false} onStop={mockOnStop} isStreaming={false} />);
 
-    const textarea = screen.getByPlaceholderText('Type a message...');
+    const textarea = screen.getByPlaceholderText('Type a message or / for commands...');
     await user.type(textarea, '/co');
 
     await waitFor(() => {
@@ -105,7 +105,7 @@ describe('MessageInput - Command Autocomplete', () => {
     const user = userEvent.setup();
     render(<MessageInput onSend={mockOnSend} disabled={false} onStop={mockOnStop} isStreaming={false} />);
 
-    const textarea = screen.getByPlaceholderText('Type a message...');
+    const textarea = screen.getByPlaceholderText('Type a message or / for commands...');
     await user.type(textarea, '/compact{Enter}');
 
     expect(mockOnSend).toHaveBeenCalledWith('/compact');
@@ -115,7 +115,7 @@ describe('MessageInput - Command Autocomplete', () => {
     const user = userEvent.setup();
     render(<MessageInput onSend={mockOnSend} disabled={false} onStop={mockOnStop} isStreaming={false} />);
 
-    const textarea = screen.getByPlaceholderText('Type a message...');
+    const textarea = screen.getByPlaceholderText('Type a message or / for commands...');
     await user.type(textarea, '/');
 
     await waitFor(() => {

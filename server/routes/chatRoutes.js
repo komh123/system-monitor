@@ -10,9 +10,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
 
 const MODELS = [
-  { id: 'sonnet', name: 'Claude Sonnet 4.5', default: true },
-  { id: 'opus', name: 'Claude Opus 4.6' },
-  { id: 'haiku', name: 'Claude Haiku 4.5' }
+  { id: 'sonnet', name: 'Claude Sonnet 4.5', default: true, contextWindow: 200000 },
+  { id: 'opus', name: 'Claude Opus 4.6', contextWindow: 200000 },
+  { id: 'haiku', name: 'Claude Haiku 4.5', contextWindow: 200000 },
+  { id: 'sonnet[1m]', name: 'Claude Sonnet 4.5 (1M)', contextWindow: 1000000 },
+  { id: 'opus[1m]', name: 'Claude Opus 4.6 (1M)', contextWindow: 1000000 }
 ];
 
 // GET /api/chat/models

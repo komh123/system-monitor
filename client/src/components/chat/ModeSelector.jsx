@@ -33,7 +33,7 @@ function ModeSelector({ currentMode = 'ask', onModeChange }) {
         <button
           key={mode.id}
           onClick={() => onModeChange(mode.id)}
-          className={`px-2 py-1 rounded-lg border text-xs font-medium transition-all ${
+          className={`px-2.5 py-2 rounded-lg border text-xs font-medium transition-all ${
             currentMode === mode.id
               ? mode.color
               : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-slate-300'

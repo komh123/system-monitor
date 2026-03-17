@@ -97,7 +97,7 @@ function ClaudeRemoteMonitor() {
             {loading ? '🔄 Refreshing...' : '🔄 Refresh'}
           </button>
           {lastUpdate && (
-            <span className="text-slate-500 text-[10px] sm:text-xs hidden sm:inline">
+            <span className="text-slate-500 text-[11px] sm:text-xs hidden sm:inline">
               Last: {lastUpdate.toLocaleTimeString()}
             </span>
           )}
@@ -130,31 +130,31 @@ function ClaudeRemoteMonitor() {
             <div className="text-lg sm:text-2xl font-bold text-blue-400">
               {servers.reduce((sum, s) => sum + (s.claudeRemote?.sessions?.length || 0), 0)}
             </div>
-            <div className="text-slate-400 text-[10px] sm:text-sm">Total</div>
+            <div className="text-slate-400 text-xs sm:text-sm">Total</div>
           </div>
           <div className="card text-center">
             <div className="text-lg sm:text-2xl font-bold text-green-400">
               {servers.filter(s => s.status === 'healthy').length}
             </div>
-            <div className="text-slate-400 text-[10px] sm:text-sm">Active</div>
+            <div className="text-slate-400 text-xs sm:text-sm">Active</div>
           </div>
           <div className="card text-center">
             <div className="text-lg sm:text-2xl font-bold text-slate-400">
               {servers.filter(s => s.status === 'no_sessions').length}
             </div>
-            <div className="text-slate-400 text-[10px] sm:text-sm">None</div>
+            <div className="text-slate-400 text-xs sm:text-sm">None</div>
           </div>
           <div className="card text-center hidden sm:block">
             <div className="text-lg sm:text-2xl font-bold text-yellow-400">
               {servers.filter(s => s.status === 'degraded').length}
             </div>
-            <div className="text-slate-400 text-[10px] sm:text-sm">Unstable</div>
+            <div className="text-slate-400 text-xs sm:text-sm">Unstable</div>
           </div>
           <div className="card text-center hidden sm:block">
             <div className="text-lg sm:text-2xl font-bold text-red-400">
               {servers.filter(s => s.status === 'failed').length}
             </div>
-            <div className="text-slate-400 text-[10px] sm:text-sm">Offline</div>
+            <div className="text-slate-400 text-xs sm:text-sm">Offline</div>
           </div>
         </div>
       )}

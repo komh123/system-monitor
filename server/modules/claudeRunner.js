@@ -38,10 +38,17 @@ class ClaudeRunner extends EventEmitter {
     args.push('--verbose');
 
     // Map mode to permission-mode
-    // ask: normal mode (requireApproval)
-    // plan: plan mode (requireApproval)
-    // bypass: bypass mode (bypassPermissions)
-    const permissionMode = mode === 'bypass' ? 'bypassPermissions' : 'requireApproval';
+    // Valid choices: acceptEdits, bypassPermissions, default, dontAsk, plan, auto
+    // ask → default, plan → plan, bypass → bypassPermissions
+    const permissionModeMap = {
+      'ask': 'default',
+      'plan': 'plan',
+      'bypass': 'bypassPermissions',
+      'auto': 'auto',
+      'acceptEdits': 'acceptEdits',
+      'dontAsk': 'dontAsk',
+    };
+    const permissionMode = permissionModeMap[mode] || 'default';
     args.push('--permission-mode', permissionMode);
 
     if (systemPrompt && !claudeSessionId) {

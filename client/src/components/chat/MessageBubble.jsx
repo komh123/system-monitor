@@ -13,7 +13,7 @@ function MessageBubble({ message }) {
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
-      <div className={`max-w-[85%] sm:max-w-[75%] ${
+      <div className={`max-w-[92%] sm:max-w-[75%] ${
         isUser
           ? isSlashCommand
             ? 'bg-purple-600/80 text-white rounded-2xl rounded-br-md border border-purple-500/30'
@@ -46,7 +46,7 @@ function MessageBubble({ message }) {
         )}
 
         {/* Timestamp */}
-        <div className={`text-[10px] mt-1 ${isUser ? 'text-blue-200' : 'text-slate-500'}`}>
+        <div className={`text-[11px] mt-1 ${isUser ? 'text-blue-200' : 'text-slate-500'}`}>
           {new Date(message.timestamp).toLocaleTimeString()}
         </div>
       </div>

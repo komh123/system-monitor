@@ -12,6 +12,16 @@
   --accent-green: #22c55e;
   --accent-yellow: #eab308;
   --accent-red: #ef4444;
+  /* Safe area CSS custom properties */
+  --sat: env(safe-area-inset-top);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+  --sar: env(safe-area-inset-right);
+}
+
+html {
+  /* Prevent overscroll/bounce in PWA standalone mode */
+  overscroll-behavior-y: contain;
 }
 
 body {
@@ -21,10 +31,16 @@ body {
   color: var(--text-primary);
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: contain;
+  /* Safe area padding for notched devices */
+  padding-left: var(--sal);
+  padding-right: var(--sar);
 }
 
 * {
   box-sizing: border-box;
+  /* Prevent double-tap zoom without blocking pinch-zoom */
+  touch-action: manipulation;
 }
 
 /* Touch-friendly defaults */
@@ -33,10 +49,15 @@ button, a, select {
   min-width: 44px;
 }
 
-/* Exception for inline/tiny buttons */
+/* Exception for inline/tiny buttons (table actions, badges) */
 .btn-inline {
   min-height: auto;
   min-width: auto;
+}
+
+/* Prevent iOS Safari auto-zoom on input focus (must be >= 16px) */
+input, select, textarea {
+  font-size: 16px;
 }
 
 .card {
@@ -73,6 +94,7 @@ button, a, select {
 
 .table-container {
   @apply overflow-x-auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 table {
@@ -110,11 +132,6 @@ tr:hover {
 
 /* Mobile-specific overrides */
 @media (max-width: 639px) {
-  /* Make tables horizontally scrollable with momentum */
-  .table-container {
-    -webkit-overflow-scrolling: touch;
-  }
-
   /* Compact table cells on mobile */
   th, td {
     @apply py-2 px-2 text-xs;

@@ -228,6 +228,15 @@ class SSHPool {
             conn.status = 'unhealthy';
             this.scheduleReconnect(ip);
           }
+        } else if (conn.status === 'ssh_unreachable' || conn.status === 'disconnected') {
+          // Periodically retry disconnected/unreachable servers
+          // This handles servers that reboot and come back online
+          console.log(`Heartbeat: retrying ${conn.status} server ${ip}...`);
+          try {
+            await this.addServer(conn.config);
+          } catch (error) {
+            // Still unreachable, will try again next heartbeat cycle
+          }
         }
       }
     }, 60000); // Every 60 seconds
@@ -250,8 +259,8 @@ class SSHPool {
   scheduleReconnect(ip) {
     const attempts = this.reconnectAttempts.get(ip) || { count: 0, lastAttempt: 0 };
 
-    // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
-    const delays = [1000, 2000, 4000, 8000, 30000];
+    // Exponential backoff: 1s, 2s, 4s, 8s, 30s, then 60s forever
+    const delays = [1000, 2000, 4000, 8000, 30000, 60000];
     const delay = delays[Math.min(attempts.count, delays.length - 1)];
 
     // Prevent too frequent reconnects
@@ -267,13 +276,17 @@ class SSHPool {
     console.log(`Scheduling reconnect to ${ip} in ${delay}ms (attempt ${attempts.count})`);
 
     setTimeout(async () => {
-      if (attempts.count > 5) {
-        console.error(`Max reconnection attempts reached for ${ip}`);
+      // After 10 fast attempts, switch to slow polling (every 60s, indefinitely)
+      // This ensures servers that reboot will eventually reconnect
+      if (attempts.count > 10) {
         const conn = this.connections.get(ip);
         if (conn) {
           conn.status = 'ssh_unreachable';
-          conn.error = 'Max reconnection attempts exceeded';
+          conn.error = 'Reconnecting... (slow polling every 60s)';
         }
+        // Continue trying every 60s instead of giving up
+        console.log(`Slow-polling reconnect to ${ip} (attempt ${attempts.count})`);
+        await this.addServer(this.connections.get(ip)?.config);
         return;
       }
 
@@ -283,6 +296,32 @@ class SSHPool {
         await this.addServer(conn.config);
       }
     }, delay);
+  }
+
+  /**
+   * Force reconnect to a server (called by manual "Reconnect" button)
+   * Resets all backoff state and immediately re-establishes SSH connection
+   * @param {string} ip - Server IP
+   * @returns {Promise<Object>} - {success, ip, error?}
+   */
+  async forceReconnect(ip) {
+    const conn = this.connections.get(ip);
+    if (!conn) {
+      throw new Error(`Server ${ip} not in connection pool`);
+    }
+
+    console.log(`[SSHPool] Force reconnecting to ${ip}...`);
+
+    // Close existing client if any
+    if (conn.client) {
+      try { conn.client.end(); } catch { /* ignore */ }
+    }
+
+    // Reset reconnect attempts so auto-reconnect starts fresh
+    this.reconnectAttempts.delete(ip);
+
+    // Re-establish connection from scratch
+    return this.addServer(conn.config);
   }
 
   /**

@@ -36,7 +36,7 @@ function MetricValue({ label, value, unit = '', threshold }) {
 
   return (
     <div className="flex flex-col">
-      <span className="text-slate-400 text-[10px] sm:text-xs">{label}</span>
+      <span className="text-slate-400 text-xs">{label}</span>
       <span className={`font-medium text-sm sm:text-base ${getColor(value)}`}>
         {displayValue}{unit}
       </span>
@@ -90,14 +90,14 @@ function SessionCard({ session, serverIp, index, onRecover }) {
     } bg-slate-800/50 p-2.5 sm:p-3 rounded-r`}>
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-          <span className="text-[10px] sm:text-xs font-mono text-slate-400 shrink-0">#{index + 1}</span>
-          <span className="text-[10px] sm:text-xs font-mono text-purple-400 truncate">{session.tmuxSession}</span>
+          <span className="text-[11px] sm:text-xs font-mono text-slate-400 shrink-0">#{index + 1}</span>
+          <span className="text-[11px] sm:text-xs font-mono text-purple-400 truncate">{session.tmuxSession}</span>
         </div>
         <StatusBadge status={session.status} />
       </div>
 
       {session.sessionId && (
-        <div className="text-[10px] sm:text-xs mb-2">
+        <div className="text-[11px] sm:text-xs mb-2">
           <span className="text-slate-400">ID:</span>
           <button
             onClick={() => {
@@ -112,13 +112,13 @@ function SessionCard({ session, serverIp, index, onRecover }) {
         </div>
       )}
 
-      <div className="flex items-center justify-between text-[10px] sm:text-xs mb-2">
+      <div className="flex items-center justify-between text-[11px] sm:text-xs mb-2">
         <span className="text-slate-400">PID: {session.pid}</span>
         <span className="text-green-400">Uptime: {formatUptime(session.uptime)}</span>
       </div>
 
       {session.error && (
-        <div className="text-[10px] sm:text-xs text-yellow-400 bg-yellow-500/10 p-2 rounded mb-2">
+        <div className="text-[11px] sm:text-xs text-yellow-400 bg-yellow-500/10 p-2 rounded mb-2">
           {session.error}
         </div>
       )}
@@ -345,7 +345,7 @@ function ServerCard({ server, onRecover }) {
       </div>
 
       {server.lastCheck && (
-        <div className="flex items-center justify-between text-[10px] sm:text-xs text-slate-500">
+        <div className="flex items-center justify-between text-[11px] sm:text-xs text-slate-500">
           <span>Last check:</span>
           <span>{new Date(server.lastCheck).toLocaleTimeString()}</span>
         </div>

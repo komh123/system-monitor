@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ChatHeader from '../components/chat/ChatHeader.jsx';
 import SessionDrawer from '../components/chat/SessionDrawer.jsx';
 import MessageList from '../components/chat/MessageList.jsx';
@@ -23,7 +23,9 @@ function ChatPage() {
   const [loading, setLoading] = useState(true);
   const [selectedCommand, setSelectedCommand] = useState(null);
   const [contextUsage, setContextUsage] = useState(0);
+  const [contextTokens, setContextTokens] = useState({ used: 0, total: 200000 });
   const [mode, setMode] = useState('ask');
+  const autoCompactingRef = useRef(false);
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
 
@@ -318,11 +320,15 @@ function ChatPage() {
     setMessages(prev => [...prev, systemMsg]);
   };
 
-  // Auto-compact when context usage >= 90%
+  // Auto-compact when context usage >= 90% (with dedup guard)
   useEffect(() => {
-    if (contextUsage >= 90 && activeSessionId && !isStreaming) {
-      console.log('[Auto-Compact] Context usage >= 90%, triggering auto-compact...');
-      handleCompact();
+    if (contextUsage >= 90 && activeSessionId && !isStreaming && !autoCompactingRef.current) {
+      autoCompactingRef.current = true;
+      console.log(`[Auto-Compact] Context usage ${contextUsage}% >= 90%, triggering auto-compact...`);
+      handleCompact().finally(() => {
+        // Cooldown: prevent re-trigger for 60s
+        setTimeout(() => { autoCompactingRef.current = false; }, 60000);
+      });
     }
   }, [contextUsage, activeSessionId, isStreaming]);
 
@@ -336,6 +342,7 @@ function ChatPage() {
 
       const data = await res.json();
       setContextUsage(data.percentage || 0);
+      setContextTokens({ used: data.used || 0, total: data.total || 200000 });
     } catch (err) {
       console.error('[Context] Failed to fetch:', err);
       // Keep existing context usage on error
@@ -371,7 +378,7 @@ function ChatPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-6rem)] sm:h-[calc(100vh-7rem)] -mx-2 sm:-mx-4 md:-mx-6 -mb-2 sm:-mb-4 md:-mb-6 bg-slate-900 rounded-lg overflow-hidden border border-slate-700">
+    <div className="flex h-[calc(100dvh-7.5rem)] sm:h-[calc(100dvh-7rem)] -mx-2 sm:-mx-4 md:-mx-6 -mb-2 sm:-mb-4 md:-mb-6 bg-slate-900 rounded-lg overflow-hidden border border-slate-700">
       {/* Session Drawer */}
       <SessionDrawer
         open={drawerOpen}
@@ -393,6 +400,7 @@ function ChatPage() {
           onRename={handleRename}
           onOpenPalette={() => setShowPalette(true)}
           contextUsage={contextUsage}
+          contextTokens={contextTokens}
           onCompact={handleCompact}
           mode={mode}
           onModeChange={handleModeChange}
@@ -403,6 +411,7 @@ function ChatPage() {
             <MessageList
               messages={messages}
               streamingText={isStreaming ? streamingText : null}
+              onRefresh={fetchContextUsage}
             />
             <MessageInput
               onSend={handleSend}

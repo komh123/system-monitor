@@ -27,6 +27,19 @@ export class SessionManager {
     console.log(`${logPrefix} Starting session restart...`);
 
     try {
+      // Step 0: Ensure SSH connection is alive
+      const connStatus = sshPool.getStatus(ip);
+      const isConnected = connStatus && connStatus.status === 'connected';
+
+      if (!isConnected) {
+        console.log(`${logPrefix} [0/6] SSH connection is ${connStatus?.status || 'unknown'}, force reconnecting...`);
+        const reconnectResult = await sshPool.forceReconnect(ip);
+        if (!reconnectResult.success) {
+          throw new Error(`SSH connection failed: ${reconnectResult.error || 'Server unreachable'}`);
+        }
+        console.log(`${logPrefix} ✓ SSH connection re-established`);
+      }
+
       // Step 1: 偵測 Claude CLI 路徑
       console.log(`${logPrefix} [1/6] Detecting Claude CLI...`);
       let claudePath;
@@ -166,6 +179,7 @@ export class SessionManager {
 
   /**
    * 重新連接到現有 session（重啟監控系統的 SSH 連線）
+   * If the existing SSH connection is dead, force re-establish it first.
    * @param {string} ip - Server IP
    * @returns {Promise<Object>}
    */
@@ -176,7 +190,21 @@ export class SessionManager {
     console.log(`${logPrefix} Reconnecting to server...`);
 
     try {
-      // 測試連線
+      // Step 1: Check if SSH connection is alive
+      const connStatus = sshPool.getStatus(ip);
+      const isConnected = connStatus && connStatus.status === 'connected';
+
+      if (!isConnected) {
+        // SSH connection is dead — force re-establish it
+        console.log(`${logPrefix} SSH connection is ${connStatus?.status || 'unknown'}, force reconnecting...`);
+        const reconnectResult = await sshPool.forceReconnect(ip);
+        if (!reconnectResult.success) {
+          throw new Error(`SSH reconnect failed: ${reconnectResult.error || 'Connection refused'}`);
+        }
+        console.log(`${logPrefix} ✓ SSH connection re-established`);
+      }
+
+      // Step 2: Test the connection
       const testOutput = await sshPool.exec(ip, 'echo "connection_test"', { timeout: 5000 });
 
       if (testOutput.trim() === 'connection_test') {

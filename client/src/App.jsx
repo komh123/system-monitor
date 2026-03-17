@@ -19,7 +19,7 @@ function App() {
         {/* Protected routes */}
         <Route path="/*" element={
           <ProtectedRoute>
-            <div className="min-h-screen bg-slate-900 p-2 sm:p-4 md:p-6">
+            <div className="min-h-dvh bg-slate-900 p-2 sm:p-4 md:p-6 pb-20 sm:pb-4 md:pb-6">
               <Navigation />
               <Routes>
                 <Route path="/" element={<Navigate to="/chat" replace />} />

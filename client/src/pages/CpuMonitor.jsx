@@ -579,7 +579,7 @@ function OomScoreBadge({ score, risk }) {
   return (
     <div className="flex items-center gap-1.5">
       <span className="font-mono text-sm">{score}</span>
-      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${risk.color}`}>
+      <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${risk.color}`}>
         {risk.text}
       </span>
     </div>
@@ -597,7 +597,7 @@ function OomAdjustButton({ localAdj, loading, handleAdjust }) {
       >
         −
       </button>
-      <span className={`w-10 sm:w-14 text-center font-mono text-[10px] sm:text-xs ${
+      <span className={`w-10 sm:w-14 text-center font-mono text-[11px] sm:text-xs ${
         localAdj < 0 ? 'text-green-400' : localAdj > 0 ? 'text-red-400' : 'text-slate-400'
       }`}>
         {localAdj}
@@ -653,16 +653,16 @@ function ProcessTable({ processes, onKill, onRefresh, warningThreshold, killThre
         <h2 className="text-sm sm:text-lg font-semibold">Claude Processes</h2>
         <div className="flex items-center gap-1 sm:gap-2 flex-wrap justify-end">
           {overKill.length > 0 && (
-            <span className="bg-red-500/20 text-red-400 px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-sm font-medium animate-pulse">
+            <span className="bg-red-500/20 text-red-400 px-1.5 sm:px-2 py-0.5 rounded text-[11px] sm:text-sm font-medium animate-pulse">
               {overKill.length} crit
             </span>
           )}
           {overWarning.length > 0 && (
-            <span className="bg-yellow-500/20 text-yellow-400 px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-sm font-medium">
+            <span className="bg-yellow-500/20 text-yellow-400 px-1.5 sm:px-2 py-0.5 rounded text-[11px] sm:text-sm font-medium">
               {overWarning.length} warn
             </span>
           )}
-          <span className="bg-blue-500/20 text-blue-400 px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-sm">
+          <span className="bg-blue-500/20 text-blue-400 px-1.5 sm:px-2 py-0.5 rounded text-[11px] sm:text-sm">
             {processes.count}
           </span>
         </div>
@@ -694,9 +694,9 @@ function ProcessTable({ processes, onKill, onRefresh, warningThreshold, killThre
 
               return (
                 <tr key={proc.pid} className={rowClass}>
-                  <td className="font-mono text-[10px] sm:text-xs">{proc.pid}</td>
+                  <td className="font-mono text-[11px] sm:text-xs">{proc.pid}</td>
                   <td className="hidden sm:table-cell">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium btn-inline ${
+                    <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium btn-inline ${
                       isActive
                         ? 'bg-green-500/20 text-green-400'
                         : 'bg-slate-500/20 text-slate-400'
@@ -742,7 +742,7 @@ function ProcessTable({ processes, onKill, onRefresh, warningThreshold, killThre
                   <td>
                     <button
                       onClick={() => onKill(proc.pid)}
-                      className={`${isCritical ? 'btn-danger animate-pulse' : 'btn-danger'} text-[10px] sm:text-xs px-2 py-1.5 sm:py-1 rounded font-medium transition-colors`}
+                      className={`${isCritical ? 'btn-danger animate-pulse' : 'btn-danger'} text-[11px] sm:text-xs px-2 py-1.5 sm:py-1 rounded font-medium transition-colors`}
                       title={isCritical ? `CPU ≥ ${killThreshold}% - Recommended to kill` : isWarning ? `CPU ≥ ${warningThreshold}% - Email alert sent` : ''}
                     >
                       Kill
@@ -1021,7 +1021,7 @@ function CpuMonitor() {
             <p className="text-slate-400 text-xs sm:text-sm">monitor.ko.unieai.com</p>
           </div>
           <div className="flex items-center gap-2">
-            <div className={`px-2 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-medium ${
+            <div className={`px-2 sm:px-3 py-1 rounded-lg text-[11px] sm:text-xs font-medium ${
               autoKillEnabled
                 ? 'bg-red-500/20 text-red-400 border border-red-500/50'
                 : 'bg-green-500/20 text-green-400 border border-green-500/50'
@@ -1047,7 +1047,7 @@ function CpuMonitor() {
             {loading ? '...' : '↻ Refresh'}
           </button>
           {lastUpdate && (
-            <span className="text-slate-500 text-[10px] sm:text-xs hidden sm:inline">
+            <span className="text-slate-500 text-[11px] sm:text-xs hidden sm:inline">
               Last: {lastUpdate.toLocaleTimeString()}
             </span>
           )}

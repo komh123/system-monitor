@@ -135,7 +135,7 @@ function RecoveryLogs() {
       <div className="card mb-4 sm:mb-6">
         <div className="flex gap-2 sm:gap-4">
           <div className="flex-1">
-            <label className="block text-[10px] sm:text-sm font-medium mb-1.5 sm:mb-2 text-slate-400">Server</label>
+            <label className="block text-xs sm:text-sm font-medium mb-1.5 sm:mb-2 text-slate-400">Server</label>
             <select
               value={filterServer}
               onChange={(e) => {
@@ -151,7 +151,7 @@ function RecoveryLogs() {
             </select>
           </div>
           <div className="flex-1">
-            <label className="block text-[10px] sm:text-sm font-medium mb-1.5 sm:mb-2 text-slate-400">Event</label>
+            <label className="block text-xs sm:text-sm font-medium mb-1.5 sm:mb-2 text-slate-400">Event</label>
             <select
               value={filterEvent}
               onChange={(e) => {
@@ -195,14 +195,14 @@ function RecoveryLogs() {
             <tbody>
               {paginatedLogs.map((log, index) => (
                 <tr key={index} className="border-b border-slate-800 hover:bg-slate-800/50">
-                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-[10px] sm:text-sm text-slate-300 whitespace-nowrap">
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-xs sm:text-sm text-slate-300 whitespace-nowrap">
                     {new Date(log.timestamp).toLocaleTimeString()}
                   </td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-xs sm:text-sm font-medium">
                     {log.server}
                   </td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4">
-                    <span className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-[10px] sm:text-xs font-medium ${getEventColor(log.event)}`}>
+                    <span className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-[11px] sm:text-xs font-medium ${getEventColor(log.event)}`}>
                       {log.event}
                     </span>
                   </td>

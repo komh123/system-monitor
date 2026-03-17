@@ -68,7 +68,7 @@ function CircularGauge({ value, label, sublabel, resetsAt, size = 140 }) {
         {/* Center text */}
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className={`text-2xl font-bold ${color.text}`}>{value}%</span>
-          <span className="text-[10px] text-slate-500 uppercase tracking-wide">used</span>
+          <span className="text-xs text-slate-500 uppercase tracking-wide">used</span>
         </div>
       </div>
       <div className="text-center">

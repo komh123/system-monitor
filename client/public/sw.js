@@ -1,5 +1,5 @@
 // Service Worker for System Monitor PWA
-const CACHE_VERSION = 'v2.27.0';
+const CACHE_VERSION = 'v2.33.0';
 const CACHE_NAME = `system-monitor-${CACHE_VERSION}`;
 
 // Assets to cache on install

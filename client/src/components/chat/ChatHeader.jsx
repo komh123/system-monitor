@@ -4,7 +4,9 @@ import ModeSelector from './ModeSelector.jsx';
 
 const MODEL_COLORS = {
   sonnet: 'bg-blue-500/20 text-blue-400 border-blue-500/50',
+  'sonnet[1m]': 'bg-blue-500/20 text-blue-400 border-blue-500/50',
   opus: 'bg-purple-500/20 text-purple-400 border-purple-500/50',
+  'opus[1m]': 'bg-purple-500/20 text-purple-400 border-purple-500/50',
   haiku: 'bg-green-500/20 text-green-400 border-green-500/50'
 };
 
@@ -16,6 +18,7 @@ function ChatHeader({
   onRename,
   onOpenPalette,
   contextUsage = 0,
+  contextTokens = { used: 0, total: 200000 },
   onCompact,
   mode = 'ask',
   onModeChange
@@ -36,7 +39,7 @@ function ChatHeader({
         <div className="flex items-center gap-2">
           <button
             onClick={onMenuToggle}
-            className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-700 active:bg-slate-600 transition-colors sm:hidden"
+            className="w-11 h-11 flex items-center justify-center rounded-lg hover:bg-slate-700 active:bg-slate-600 transition-colors sm:hidden"
           >
             <span className="text-lg">☰</span>
           </button>
@@ -53,7 +56,7 @@ function ChatHeader({
         <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
         <button
           onClick={onMenuToggle}
-          className="w-10 h-10 shrink-0 flex items-center justify-center rounded-lg hover:bg-slate-700 active:bg-slate-600 transition-colors sm:hidden"
+          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-lg hover:bg-slate-700 active:bg-slate-600 transition-colors sm:hidden"
         >
           <span className="text-lg">☰</span>
         </button>
@@ -112,7 +115,7 @@ function ChatHeader({
       {/* Bottom row: Mode selector and context indicator */}
       <div className="flex items-center justify-between gap-2">
         <ModeSelector currentMode={mode} onModeChange={onModeChange} />
-        <ContextIndicator percentage={contextUsage} onCompact={onCompact} />
+        <ContextIndicator percentage={contextUsage} used={contextTokens.used} total={contextTokens.total} onCompact={onCompact} />
       </div>
     </div>
   );
