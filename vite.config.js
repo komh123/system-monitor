@@ -6,7 +6,16 @@ export default defineConfig({
   root: 'client',
   build: {
     outDir: '../dist',
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Split vendor libraries into separate chunks for better caching
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-charts': ['recharts'],
+        }
+      }
+    }
   },
   server: {
     proxy: {

@@ -1,11 +1,11 @@
 // Service Worker for System Monitor PWA
-const CACHE_VERSION = 'v2.33.0';
+const CACHE_VERSION = 'v2.33.2';
 const CACHE_NAME = `system-monitor-${CACHE_VERSION}`;
 
-// Assets to cache on install
+// Only cache truly static assets (icons, manifest) — NOT index.html
+// index.html references hashed JS/CSS bundles that change on every build,
+// so caching it causes white screen when a new version is deployed.
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
   '/manifest.json',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png'
@@ -13,7 +13,6 @@ const STATIC_ASSETS = [
 
 // Runtime cache for API responses
 const API_CACHE_NAME = `system-monitor-api-${CACHE_VERSION}`;
-const API_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 // Install event - cache static assets
 self.addEventListener('install', (event) => {
@@ -49,7 +48,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch event - network-first for API, cache-first for assets
+// Fetch event
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -64,37 +63,24 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          // Clone response for caching
-          const responseClone = response.clone();
-
           // Cache successful GET requests
           if (request.method === 'GET' && response.ok) {
+            const responseClone = response.clone();
             caches.open(API_CACHE_NAME).then((cache) => {
               cache.put(request, responseClone);
             });
           }
-
           return response;
         })
         .catch(() => {
-          // Fallback to cache if network fails
           return caches.match(request)
             .then((cachedResponse) => {
               if (cachedResponse) {
-                console.log('[SW] Serving cached API response:', url.pathname);
                 return cachedResponse;
               }
-
-              // Return offline response for failed API calls
               return new Response(
-                JSON.stringify({
-                  error: 'Offline - No cached data available',
-                  offline: true
-                }),
-                {
-                  status: 503,
-                  headers: { 'Content-Type': 'application/json' }
-                }
+                JSON.stringify({ error: 'Offline', offline: true }),
+                { status: 503, headers: { 'Content-Type': 'application/json' } }
               );
             });
         })
@@ -102,46 +88,47 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets - cache-first with network fallback
+  // Navigation requests (HTML pages) — ALWAYS network-first
+  // This prevents white screen from stale cached index.html
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .catch(() => caches.match('/index.html'))
+    );
+    return;
+  }
+
+  // Hashed assets (/assets/index-XXXX.js, /assets/index-XXXX.css) — cache-first
+  // These filenames contain content hashes, so cached versions are always correct
+  if (url.pathname.startsWith('/assets/')) {
+    event.respondWith(
+      caches.match(request)
+        .then((cachedResponse) => {
+          if (cachedResponse) return cachedResponse;
+          return fetch(request).then((networkResponse) => {
+            if (networkResponse.ok) {
+              const clone = networkResponse.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+            }
+            return networkResponse;
+          });
+        })
+    );
+    return;
+  }
+
+  // Other static assets (icons, manifest) — stale-while-revalidate
   event.respondWith(
     caches.match(request)
       .then((cachedResponse) => {
-        if (cachedResponse) {
-          // Return cached version and update cache in background
-          fetch(request).then((networkResponse) => {
-            if (networkResponse.ok) {
-              caches.open(CACHE_NAME).then((cache) => {
-                cache.put(request, networkResponse);
-              });
-            }
-          }).catch(() => {});
+        const fetchPromise = fetch(request).then((networkResponse) => {
+          if (networkResponse.ok) {
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, networkResponse.clone()));
+          }
+          return networkResponse;
+        }).catch(() => cachedResponse);
 
-          return cachedResponse;
-        }
-
-        // Not in cache, fetch from network
-        return fetch(request)
-          .then((networkResponse) => {
-            // Cache successful responses for navigation and assets
-            if (networkResponse.ok && (request.mode === 'navigate' || request.destination === 'script' || request.destination === 'style')) {
-              const responseClone = networkResponse.clone();
-              caches.open(CACHE_NAME).then((cache) => {
-                cache.put(request, responseClone);
-              });
-            }
-
-            return networkResponse;
-          })
-          .catch((error) => {
-            console.error('[SW] Fetch failed:', url.pathname, error);
-
-            // Return offline page for navigation requests
-            if (request.mode === 'navigate') {
-              return caches.match('/index.html');
-            }
-
-            throw error;
-          });
+        return cachedResponse || fetchPromise;
       })
   );
 });
@@ -155,25 +142,20 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'CLEAR_CACHE') {
     event.waitUntil(
       caches.keys().then((cacheNames) => {
-        return Promise.all(
-          cacheNames.map((name) => caches.delete(name))
-        );
+        return Promise.all(cacheNames.map((name) => caches.delete(name)));
       })
     );
   }
 });
 
-// Background sync for offline chat messages (future feature)
+// Background sync placeholder
 self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-messages') {
-    event.waitUntil(
-      // Placeholder for syncing offline messages
-      Promise.resolve()
-    );
+    event.waitUntil(Promise.resolve());
   }
 });
 
-// Push notifications (future feature)
+// Push notifications
 self.addEventListener('push', (event) => {
   const data = event.data ? event.data.json() : {};
   const title = data.title || 'System Monitor';
@@ -183,17 +165,11 @@ self.addEventListener('push', (event) => {
     badge: '/icons/badge-72x72.png',
     data: data.url || '/'
   };
-
-  event.waitUntil(
-    self.registration.showNotification(title, options)
-  );
+  event.waitUntil(self.registration.showNotification(title, options));
 });
 
 // Notification click
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-
-  event.waitUntil(
-    clients.openWindow(event.notification.data || '/')
-  );
+  event.waitUntil(clients.openWindow(event.notification.data || '/'));
 });

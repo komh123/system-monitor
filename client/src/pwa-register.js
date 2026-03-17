@@ -30,9 +30,13 @@ export function registerServiceWorker() {
           console.error('[PWA] Service Worker registration failed:', error);
         });
 
-      // Handle service worker updates
+      // Handle service worker updates (guard against infinite reload)
+      let reloading = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        window.location.reload();
+        if (!reloading) {
+          reloading = true;
+          window.location.reload();
+        }
       });
     });
   }

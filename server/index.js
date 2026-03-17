@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import { readFileSync, existsSync, readFile, writeFileSync } from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -16,6 +17,9 @@ const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
+
+// Enable gzip/brotli compression for all responses
+app.use(compression());
 const PORT = process.env.PORT || 3000;
 const METRICS_FILE = '/home/ubuntu/cpu-watchdog-metrics.json';
 const LOG_FILE = '/home/ubuntu/cpu-watchdog.log';
@@ -99,14 +103,26 @@ app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/usage', usageRoutes);
 
-// Serve static files in production with no-cache headers
+// Serve static files in production with smart cache headers
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../dist'), {
-    maxAge: 0,
-    setHeaders: (res, path) => {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
+    setHeaders: (res, filePath) => {
+      // Hashed assets (e.g., /assets/index-CTawsT0u.js) — cache aggressively
+      // These filenames change on every build, so cached versions are always valid
+      if (filePath.includes('/assets/')) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        return;
+      }
+      // sw.js and index.html — NEVER cache
+      // Stale sw.js causes stale cache; stale index.html causes white screen
+      if (filePath.endsWith('sw.js') || filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        return;
+      }
+      // Everything else (manifest, icons) — short cache with revalidation
+      res.setHeader('Cache-Control', 'public, max-age=3600, must-revalidate');
     }
   }));
 }
@@ -1168,9 +1184,11 @@ app.get('/claude-remote/docs', (req, res) => {
   }
 });
 
-// Serve React app for all other routes in production
+// Serve React app for all other routes in production (SPA fallback)
 if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
     res.sendFile(path.join(__dirname, '../dist/index.html'));
   });
 }

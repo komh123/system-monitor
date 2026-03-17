@@ -1,6 +1,6 @@
 {
   "name": "system-monitor",
-  "version": "2.33.1",
+  "version": "2.33.2",
   "description": "CPU and System Monitor Dashboard for Claude Code Extension",
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
