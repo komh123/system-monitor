@@ -6,7 +6,7 @@ const MODEL_BADGES = {
   haiku: 'bg-green-500/20 text-green-400'
 };
 
-function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onDelete }) {
+function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onDelete, projects, onProjectOpen, onNewProject }) {
   // Collapsed state (desktop only) - saved to localStorage
   const [collapsed, setCollapsed] = useState(() => {
     const saved = localStorage.getItem('sessionDrawerCollapsed');
@@ -22,6 +22,11 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
     setCollapsed(prev => !prev);
   };
 
+  // Filter out project/deep-clean sessions from main session list
+  const regularSessions = sessions.filter(s =>
+    s.type !== 'deep-clean' && !s.type?.startsWith('project-')
+  );
+
   return (
     <>
       {/* Backdrop (mobile only) */}
@@ -34,10 +39,8 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
 
       {/* Drawer */}
       <div className={`fixed top-0 left-0 bottom-0 bg-slate-800 border-r border-slate-700 z-50 transform transition-all duration-200 ${
-        // Mobile: slide in/out based on 'open' prop
         open ? 'translate-x-0' : '-translate-x-full'
       } sm:relative sm:translate-x-0 ${
-        // Desktop: change width based on collapsed state
         collapsed ? 'sm:w-14' : 'sm:w-64'
       } w-72 sm:shrink-0`}>
         <div className="flex flex-col h-full">
@@ -63,16 +66,16 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
             </button>
           </div>
 
-          {/* Session List */}
+          {/* Session List (regular sessions only) */}
           <div className="flex-1 overflow-y-auto">
-            {sessions.length === 0 ? (
+            {regularSessions.length === 0 ? (
               <div className={`text-center py-8 text-slate-500 text-xs ${
                 collapsed ? 'hidden sm:block' : ''
               }`}>
-                {collapsed ? '📭' : 'No sessions yet'}
+                {collapsed ? '\uD83D\uDCED' : 'No sessions yet'}
               </div>
             ) : (
-              sessions.map(s => (
+              regularSessions.map(s => (
                 <div
                   key={s.id}
                   className={`w-full border-b border-slate-700/50 transition-colors ${
@@ -92,19 +95,19 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
                       title={collapsed ? s.sessionName : ''}
                     >
                       {collapsed ? (
-                        // Collapsed view: only show icon
                         <div className="hidden sm:flex flex-col items-center gap-1">
-                          <span className="text-lg">{s.model === 'opus' ? '🟣' : s.model === 'haiku' ? '🟢' : '🔵'}</span>
+                          <span className="text-lg">{s.model === 'opus' || s.model?.startsWith('opus') ? '\uD83D\uDFE3' : s.model === 'haiku' ? '\uD83D\uDFE2' : '\uD83D\uDD35'}</span>
                           <span className="text-[8px] text-slate-500">{s.messageCount}</span>
                         </div>
                       ) : (
-                        // Expanded view: show full details
                         <>
-                          <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center justify-between mb-1 gap-1">
                             <span className="text-sm font-medium truncate">{s.sessionName}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES.sonnet}`}>
-                              {s.model}
-                            </span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES[s.model?.split('[')[0]] || MODEL_BADGES.sonnet}`}>
+                                {s.model}
+                              </span>
+                            </div>
                           </div>
                           <div className="flex items-center justify-between text-xs text-slate-500">
                             <span>{s.messageCount} msgs</span>
@@ -112,13 +115,15 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
                           </div>
                         </>
                       )}
-                      {/* Mobile view (same as expanded) */}
+                      {/* Mobile view */}
                       <div className="sm:hidden">
-                        <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center justify-between mb-1 gap-1">
                           <span className="text-sm font-medium truncate">{s.sessionName}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES.sonnet}`}>
-                            {s.model}
-                          </span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES[s.model?.split('[')[0]] || MODEL_BADGES.sonnet}`}>
+                              {s.model}
+                            </span>
+                          </div>
                         </div>
                         <div className="flex items-center justify-between text-xs text-slate-500">
                           <span>{s.messageCount} msgs</span>
@@ -133,13 +138,67 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
                         title="Delete session"
                         style={{ minHeight: '44px' }}
                       >
-                        🗑️
+                        {'\uD83D\uDDD1\uFE0F'}
                       </button>
                     )}
                   </div>
                 </div>
               ))
             )}
+          </div>
+
+          {/* Projects Section */}
+          <div className="border-t border-slate-700">
+            {!collapsed && (
+              <div className="flex items-center justify-between px-3 py-2">
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Projects</span>
+                {onNewProject && (
+                  <button
+                    onClick={onNewProject}
+                    className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                    title="New project"
+                  >
+                    + Project
+                  </button>
+                )}
+              </div>
+            )}
+            {collapsed && onNewProject && (
+              <button
+                onClick={onNewProject}
+                className="w-full p-2 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 transition-colors flex items-center justify-center"
+                title="New project"
+              >
+                <span className="text-[10px]">{'\u2795'}</span>
+              </button>
+            )}
+
+            {projects && projects.map(proj => (
+              <button
+                key={proj.slug}
+                onClick={() => onProjectOpen(proj.slug)}
+                className={`w-full transition-colors flex items-center ${
+                  collapsed
+                    ? 'p-3 justify-center'
+                    : 'px-3 py-2 gap-2'
+                } ${
+                  proj.sessionId && proj.sessionId === activeId
+                    ? 'bg-slate-700/50 text-white'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-700/30 active:bg-slate-700/50'
+                }`}
+                title={collapsed ? proj.name : ''}
+              >
+                <span className="text-base">{proj.emoji}</span>
+                {!collapsed && (
+                  <div className="flex-1 flex items-center justify-between min-w-0">
+                    <span className="text-xs font-medium truncate">{proj.name}</span>
+                    {proj.messageCount > 0 && (
+                      <span className="text-[10px] text-slate-500 shrink-0 ml-1">{proj.messageCount}</span>
+                    )}
+                  </div>
+                )}
+              </button>
+            ))}
           </div>
 
           {/* Toggle Button (desktop only) */}
@@ -150,7 +209,7 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
               title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
               <span className="text-base">
-                {collapsed ? '»' : '«'}
+                {collapsed ? '\u00BB' : '\u00AB'}
               </span>
             </button>
           </div>

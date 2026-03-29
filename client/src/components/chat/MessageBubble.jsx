@@ -150,6 +150,7 @@ function MessageBubble({ message }) {
                 tool={tool.name || tool.tool}
                 input={tool.input}
                 output={tool.output}
+                status={tool.status || 'complete'}
               />
             ))}
           </div>

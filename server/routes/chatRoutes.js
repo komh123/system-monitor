@@ -380,6 +380,7 @@ router.get('/sessions', (req, res) => {
     sessionName: s.sessionName,
     serverIp: s.serverIp,
     model: s.model,
+    type: s.type || 'general',
     status: s.status,
     createdAt: s.createdAt,
     lastActivity: s.lastActivity,
@@ -390,18 +391,279 @@ router.get('/sessions', (req, res) => {
 
 // POST /api/chat/sessions
 router.post('/sessions', (req, res) => {
-  const { serverIp, model, sessionName, allowedTools, systemPrompt } = req.body;
+  const { serverIp, model, sessionName, allowedTools, systemPrompt, type } = req.body;
   if (!serverIp) {
     return res.status(400).json({ error: 'serverIp is required' });
   }
 
   const store = getChatSessionStore();
-  const session = store.create({ serverIp, model, sessionName, allowedTools, systemPrompt });
+  const session = store.create({ serverIp, model, sessionName, allowedTools, systemPrompt, type });
   res.json({
     id: session.id,
     sessionName: session.sessionName,
+    type: session.type,
     status: session.status
   });
+});
+
+// Deep Clean system prompt
+const DEEP_CLEAN_SYSTEM_PROMPT = `你是磁碟清理專家。你的職責是：
+1. 分析磁碟使用狀況，找出佔用空間最大的目錄和檔案
+2. 建議安全的清理策略
+3. 執行清理操作前，總是先顯示要刪除的內容和預估可釋放的空間
+4. 每次操作後報告清理前/後的磁碟使用對比
+
+重要安全規則：
+- 永遠不要刪除 /home/ubuntu 下的原始碼目錄（如 agent-skill, system-monitor, k8s-auto-deployer-fastapi 等）
+- 永遠不要刪除 .env、credentials.json、token.json 等敏感檔案
+- Docker 清理只刪除 dangling images 和停止的 containers
+- 刪除前必須列出要刪除的檔案清單讓使用者確認
+- 使用 df -h 顯示磁碟使用統計
+
+常用診斷指令：
+- df -h /
+- du -sh /* 2>/dev/null | sort -rh | head -20
+- find / -xdev -size +100M -type f 2>/dev/null | head -20
+- docker system df
+- journalctl --disk-usage`;
+
+// POST /api/chat/sessions/deep-clean — Create or get deep-clean session
+router.post('/sessions/deep-clean', (req, res) => {
+  const store = getChatSessionStore();
+
+  // Find existing non-archived deep-clean session
+  const existing = store.list().find(s => s.type === 'deep-clean' && s.status !== 'archived');
+  if (existing) {
+    return res.json({
+      id: existing.id,
+      sessionName: existing.sessionName,
+      type: existing.type,
+      model: existing.model,
+      status: existing.status,
+      isNew: false
+    });
+  }
+
+  // Get first available server
+  const configPath = process.env.SERVERS_CONFIG_PATH || path.join(__dirname, '../config/servers.json');
+  let servers = [];
+  try { servers = JSON.parse(readFileSync(configPath, 'utf-8')); } catch {}
+  const serverIp = req.body.serverIp || servers[0]?.ip;
+  if (!serverIp) {
+    return res.status(400).json({ error: 'No server available' });
+  }
+
+  const session = store.create({
+    serverIp,
+    model: 'opus[1m]',
+    sessionName: 'Deep Clean',
+    allowedTools: ['Bash', 'Read', 'Glob', 'Grep'],
+    systemPrompt: DEEP_CLEAN_SYSTEM_PROMPT,
+    type: 'deep-clean'
+  });
+
+  res.json({
+    id: session.id,
+    sessionName: session.sessionName,
+    type: session.type,
+    model: session.model,
+    status: session.status,
+    isNew: true
+  });
+});
+
+// ============================================================
+// Project Sessions — persistent, named project workspaces
+// ============================================================
+
+// Default project definitions
+const DEFAULT_PROJECTS = [
+  {
+    slug: 'neuropack',
+    name: 'NeuroPack',
+    emoji: '🧠',
+    model: 'opus[1m]',
+    systemPrompt: `你是 NeuroPack 專案的專屬開發助手。NeuroPack 是一個 AI/ML 工具包專案。
+你的職責是：
+1. 熟悉並追蹤 NeuroPack 的架構、代碼和進度
+2. 協助開發、除錯、測試和部署
+3. 維護專案的技術上下文，讓開發者不需要每次重新解釋
+
+首次開啟時，請先回顧專案目錄結構和最近的 git 歷史來建立上下文。`,
+    reviewPrompt: `請回顧 NeuroPack 專案的現況：
+1. 找到專案根目錄（搜尋 ~/NeuroPack 或類似路徑）
+2. ls 查看目錄結構
+3. git log --oneline -10 查看最近提交
+4. 讀取 README.md 或主要入口檔案了解專案概況
+5. 總結專案現狀和可能的下一步工作`
+  },
+  {
+    slug: 'richs',
+    name: 'Richs',
+    emoji: '💰',
+    model: 'opus[1m]',
+    systemPrompt: `你是 Richs (AI Investment Platform) 專案的專屬開發助手。
+專案路徑：~/agent-skill/ai-investment-platform
+前端：Next.js (app router) → https://richs.ko.unieai.com
+後端：FastAPI → https://api-richs.ko.unieai.com
+K8s namespace: deployer-dev
+
+你的職責是：
+1. 熟悉並追蹤 Richs 平台的前後端架構和進度
+2. 協助開發、除錯、測試和部署
+3. 維護專案的技術上下文，讓開發者不需要每次重新解釋
+
+首次開啟時，請先回顧專案結構和最近的 git 歷史來建立上下文。`,
+    reviewPrompt: `請回顧 Richs AI Investment Platform 的現況：
+1. ls ~/agent-skill/ai-investment-platform/ 查看目錄結構
+2. git -C ~/agent-skill/ai-investment-platform log --oneline -10 查看最近提交
+3. git -C ~/agent-skill/ai-investment-platform status --short 查看未提交的變更
+4. kubectl get pods -n deployer-dev | grep -E "(frontend|backend)" 查看部署狀態
+5. 總結專案現狀和可能的下一步工作`
+  }
+];
+
+// GET /api/chat/projects — List available projects
+router.get('/projects', (req, res) => {
+  const store = getChatSessionStore();
+  const allSessions = store.list();
+
+  // Build project list from defaults + user-created projects
+  const projects = [];
+
+  // Add default projects
+  for (const proj of DEFAULT_PROJECTS) {
+    const session = allSessions.find(s => s.type === `project-${proj.slug}` && s.status !== 'archived');
+    projects.push({
+      slug: proj.slug,
+      name: proj.name,
+      emoji: proj.emoji,
+      sessionId: session?.id || null,
+      hasSession: !!session,
+      messageCount: session?.messageCount || 0,
+      lastActivity: session?.lastActivity || null,
+      isDefault: true
+    });
+  }
+
+  // Add Deep Clean as a project too
+  const deepCleanSession = allSessions.find(s => s.type === 'deep-clean' && s.status !== 'archived');
+  projects.push({
+    slug: 'deep-clean',
+    name: 'Deep Clean',
+    emoji: '🧹',
+    sessionId: deepCleanSession?.id || null,
+    hasSession: !!deepCleanSession,
+    messageCount: deepCleanSession?.messageCount || 0,
+    lastActivity: deepCleanSession?.lastActivity || null,
+    isDefault: true
+  });
+
+  // Add user-created projects
+  const userProjects = allSessions.filter(s =>
+    s.type?.startsWith('project-') &&
+    !DEFAULT_PROJECTS.some(d => s.type === `project-${d.slug}`) &&
+    s.status !== 'archived'
+  );
+  for (const s of userProjects) {
+    const slug = s.type.replace('project-', '');
+    projects.push({
+      slug,
+      name: s.sessionName,
+      emoji: '📁',
+      sessionId: s.id,
+      hasSession: true,
+      messageCount: s.messageCount || 0,
+      lastActivity: s.lastActivity || null,
+      isDefault: false
+    });
+  }
+
+  res.json({ projects });
+});
+
+// POST /api/chat/projects/:slug/open — Open or create a project session
+router.post('/projects/:slug/open', (req, res) => {
+  const store = getChatSessionStore();
+  const { slug } = req.params;
+
+  // Check for existing session
+  const sessionType = slug === 'deep-clean' ? 'deep-clean' : `project-${slug}`;
+  const existing = store.list().find(s => s.type === sessionType && s.status !== 'archived');
+  if (existing) {
+    return res.json({
+      id: existing.id,
+      sessionName: existing.sessionName,
+      type: existing.type,
+      model: existing.model,
+      status: existing.status,
+      isNew: false
+    });
+  }
+
+  // Handle deep-clean specially (reuse existing logic)
+  if (slug === 'deep-clean') {
+    const configPath = process.env.SERVERS_CONFIG_PATH || path.join(__dirname, '../config/servers.json');
+    let servers = [];
+    try { servers = JSON.parse(readFileSync(configPath, 'utf-8')); } catch {}
+    const serverIp = req.body.serverIp || servers[0]?.ip;
+    if (!serverIp) return res.status(400).json({ error: 'No server available' });
+
+    const session = store.create({
+      serverIp,
+      model: 'opus[1m]',
+      sessionName: 'Deep Clean',
+      allowedTools: ['Bash', 'Read', 'Glob', 'Grep'],
+      systemPrompt: DEEP_CLEAN_SYSTEM_PROMPT,
+      type: 'deep-clean'
+    });
+    return res.json({ id: session.id, sessionName: session.sessionName, type: session.type, model: session.model, status: session.status, isNew: true });
+  }
+
+  // Find default project definition
+  const defaultProj = DEFAULT_PROJECTS.find(p => p.slug === slug);
+
+  // Get server
+  const configPath = process.env.SERVERS_CONFIG_PATH || path.join(__dirname, '../config/servers.json');
+  let servers = [];
+  try { servers = JSON.parse(readFileSync(configPath, 'utf-8')); } catch {}
+  const serverIp = req.body.serverIp || servers[0]?.ip;
+  if (!serverIp) return res.status(400).json({ error: 'No server available' });
+
+  const session = store.create({
+    serverIp,
+    model: defaultProj?.model || 'opus[1m]',
+    sessionName: defaultProj?.name || req.body.name || slug,
+    allowedTools: ['Read', 'Edit', 'Bash', 'Write', 'Glob', 'Grep'],
+    systemPrompt: defaultProj?.systemPrompt || `你是 ${req.body.name || slug} 專案的專屬開發助手。首次開啟時，請先回顧專案結構和最近的 git 歷史來建立上下文。`,
+    type: `project-${slug}`
+  });
+
+  res.json({
+    id: session.id,
+    sessionName: session.sessionName,
+    type: session.type,
+    model: session.model,
+    status: session.status,
+    isNew: true,
+    reviewPrompt: defaultProj?.reviewPrompt || `請回顧 ${req.body.name || slug} 專案的現況：\n1. 找到專案根目錄\n2. ls 查看目錄結構\n3. git log --oneline -10 查看最近提交\n4. 總結專案現狀和可能的下一步工作`
+  });
+});
+
+// POST /api/chat/projects — Create a new user project
+router.post('/projects', (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Project name is required' });
+
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  if (!slug) return res.status(400).json({ error: 'Invalid project name' });
+
+  const store = getChatSessionStore();
+  // Check if project already exists
+  const existing = store.list().find(s => s.type === `project-${slug}` && s.status !== 'archived');
+  if (existing) return res.status(409).json({ error: 'Project already exists', slug });
+
+  res.json({ slug, name: name.trim() });
 });
 
 // PATCH /api/chat/sessions/:id

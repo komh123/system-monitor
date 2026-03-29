@@ -3,6 +3,7 @@ import ChatHeader from '../components/chat/ChatHeader.jsx';
 import SessionDrawer from '../components/chat/SessionDrawer.jsx';
 import MessageList from '../components/chat/MessageList.jsx';
 import MessageInput from '../components/chat/MessageInput.jsx';
+import QuickActionPanel from '../components/chat/QuickActionPanel.jsx';
 import NewSessionModal from '../components/chat/NewSessionModal.jsx';
 import CommandPalette from '../components/chat/CommandPalette.jsx';
 
@@ -14,6 +15,7 @@ function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [models, setModels] = useState([]);
   const [streamingText, setStreamingText] = useState(null);
+  const [toolSteps, setToolSteps] = useState([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
@@ -25,6 +27,9 @@ function ChatPage() {
   const [contextUsage, setContextUsage] = useState(0);
   const [contextTokens, setContextTokens] = useState({ used: 0, total: 200000 });
   const [mode, setMode] = useState('ask');
+  const [projects, setProjects] = useState([]);
+  const [showNewProjectInput, setShowNewProjectInput] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
   const autoCompactingRef = useRef(false);
 
   const activeSession = sessions.find(s => s.id === activeSessionId);
@@ -43,14 +48,25 @@ function ChatPage() {
     }
   }, []);
 
-  // Fetch models on mount (session commands and agents are static)
+  // Fetch projects
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/projects`);
+      if (!res.ok) throw new Error('Failed');
+      const data = await res.json();
+      setProjects(data.projects || []);
+    } catch (err) {
+      console.error('Failed to fetch projects:', err);
+    }
+  }, []);
+
+  // Fetch models on mount
   useEffect(() => {
     Promise.all([
       fetch(`${API_BASE}/models`).then(r => r.json()),
       fetch(`${API_BASE}/commands`).then(r => r.json())
     ]).then(([mData, cData]) => {
       setModels(mData.models || []);
-      // Load ALL static commands: session commands + skills + agents
       const staticCommands = [
         ...(cData.sessionCommands || []),
         ...(cData.skills || []),
@@ -60,25 +76,22 @@ function ChatPage() {
     }).catch(() => {});
   }, []);
 
-  // Fetch MCP tools when active session changes (server-specific)
+  // Fetch MCP tools when active session changes
   useEffect(() => {
     if (!activeSession?.serverIp) {
       setMcpTools([]);
       return;
     }
-
-    // Fetch MCP tools from remote server
     fetch(`${API_BASE}/mcp-tools?serverIp=${encodeURIComponent(activeSession.serverIp)}`)
       .then(r => r.json())
-      .then(mcpData => {
-        setMcpTools(mcpData.tools || []);
-      })
-      .catch(() => {
-        setMcpTools([]);
-      });
+      .then(mcpData => setMcpTools(mcpData.tools || []))
+      .catch(() => setMcpTools([]));
   }, [activeSession?.serverIp]);
 
-  useEffect(() => { fetchSessions(); }, [fetchSessions]);
+  useEffect(() => {
+    fetchSessions();
+    fetchProjects();
+  }, [fetchSessions, fetchProjects]);
 
   // Load messages when active session changes
   useEffect(() => {
@@ -104,38 +117,31 @@ function ChatPage() {
   // Refresh skills from server
   const handleRefreshSkills = async () => {
     if (!activeSession?.serverIp) return;
-
     try {
       const skillData = await fetch(`${API_BASE}/skills?serverIp=${encodeURIComponent(activeSession.serverIp)}`).then(r => r.json());
-
       setCommands(prev => {
         const withoutSkills = prev.filter(c => c.category !== 'skill');
         return [...withoutSkills, ...(skillData.skills || [])];
       });
-
-      // Add system message
-      const systemMsg = {
+      setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `✅ Skills refreshed! Loaded ${skillData.skills?.length || 0} skills from ${activeSession.serverIp}`,
+        content: `\u2705 Skills refreshed! Loaded ${skillData.skills?.length || 0} skills from ${activeSession.serverIp}`,
         timestamp: new Date().toISOString()
-      };
-      setMessages(prev => [...prev, systemMsg]);
+      }]);
     } catch (err) {
       console.error('Failed to refresh skills:', err);
-      const errorMsg = {
+      setMessages(prev => [...prev, {
         role: 'assistant',
-        content: '❌ Failed to refresh skills. Please try again.',
+        content: '\u274C Failed to refresh skills. Please try again.',
         timestamp: new Date().toISOString()
-      };
-      setMessages(prev => [...prev, errorMsg]);
+      }]);
     }
   };
 
-  // Send message (with optional images)
+  // Send message
   const handleSend = async (content, images) => {
     if (!activeSessionId || isStreaming) return;
 
-    // Handle refresh-skills command
     if (content.trim() === '/refresh-skills') {
       await handleRefreshSkills();
       return;
@@ -151,12 +157,13 @@ function ChatPage() {
     setMessages(prev => [...prev, userMsg]);
     setIsStreaming(true);
     setStreamingText('');
+    setToolSteps([]);
+
+    let collectedToolSteps = [];
 
     try {
       const body = { content, mode };
-      if (images && images.length > 0) {
-        body.images = images;
-      }
+      if (images && images.length > 0) body.images = images;
 
       const res = await fetch(`${API_BASE}/sessions/${activeSessionId}/message`, {
         method: 'POST',
@@ -168,6 +175,7 @@ function ChatPage() {
       const decoder = new TextDecoder();
       let buffer = '';
       let fullText = '';
+      let currentEvent = 'assistant_text';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -178,37 +186,80 @@ function ChatPage() {
         buffer = lines.pop();
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.substring(7).trim();
+          } else if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.substring(6));
-              if (data.text) {
-                fullText += data.text;
-                setStreamingText(fullText);
-              }
-              // Update context from result event (no polling needed)
-              if (data.contextUsed !== undefined) {
-                const total = data.contextTotal || 200000;
-                setContextTokens({ used: data.contextUsed, total });
-                setContextUsage(Math.round((data.contextUsed / total) * 100));
+              switch (currentEvent) {
+                case 'assistant_text':
+                  if (data.text) {
+                    fullText += data.text;
+                    setStreamingText(fullText);
+                  }
+                  break;
+                case 'tool_use': {
+                  const step = {
+                    tool: data.tool || data.name,
+                    input: data.input || {},
+                    output: null,
+                    status: 'running'
+                  };
+                  collectedToolSteps = [...collectedToolSteps, step];
+                  setToolSteps([...collectedToolSteps]);
+                  break;
+                }
+                case 'tool_progress':
+                  if (collectedToolSteps.length > 0 && data) {
+                    const last = collectedToolSteps.length - 1;
+                    collectedToolSteps[last] = { ...collectedToolSteps[last], progress: data };
+                    setToolSteps([...collectedToolSteps]);
+                  }
+                  break;
+                case 'tool_summary':
+                  if (collectedToolSteps.length > 0) {
+                    const last = collectedToolSteps.length - 1;
+                    collectedToolSteps[last] = {
+                      ...collectedToolSteps[last],
+                      output: data.summary || data.output || data.result || data,
+                      status: 'complete'
+                    };
+                    setToolSteps([...collectedToolSteps]);
+                  }
+                  break;
+                case 'result':
+                  if (data.contextUsed !== undefined) {
+                    const total = data.contextTotal || 200000;
+                    setContextTokens({ used: data.contextUsed, total });
+                    setContextUsage(Math.round((data.contextUsed / total) * 100));
+                  }
+                  break;
               }
             } catch { /* ignore parse errors */ }
           }
         }
       }
 
-      if (fullText) {
+      collectedToolSteps = collectedToolSteps.map(step =>
+        step.status === 'running' ? { ...step, status: 'complete' } : step
+      );
+
+      if (fullText || collectedToolSteps.length > 0) {
         setMessages(prev => [...prev, {
           role: 'assistant',
-          content: fullText,
-          timestamp: new Date().toISOString()
+          content: fullText || '',
+          timestamp: new Date().toISOString(),
+          toolUse: collectedToolSteps.length > 0 ? collectedToolSteps : undefined
         }]);
       }
     } catch (err) {
       console.error('Send failed:', err);
     } finally {
       setStreamingText(null);
+      setToolSteps([]);
       setIsStreaming(false);
       fetchSessions();
+      fetchProjects();
     }
   };
 
@@ -251,122 +302,153 @@ function ChatPage() {
   // Delete session
   const handleDeleteSession = async (sessionId) => {
     if (!confirm('Delete this session? This cannot be undone.')) return;
-
     try {
-      const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
-        method: 'DELETE'
-      });
-
+      const res = await fetch(`${API_BASE}/sessions/${sessionId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete session');
-
-      // If deleted session was active, clear active session
       if (sessionId === activeSessionId) {
         setActiveSessionId(null);
         setMessages([]);
       }
-
       fetchSessions();
+      fetchProjects();
     } catch (err) {
       console.error('Delete session failed:', err);
       alert('Failed to delete session');
     }
   };
 
+  // Open project
+  const handleProjectOpen = async (slug) => {
+    try {
+      const res = await fetch(`${API_BASE}/projects/${slug}/open`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to open project');
+      const data = await res.json();
+
+      await fetchSessions();
+      await fetchProjects();
+      setActiveSessionId(data.id);
+      setDrawerOpen(false);
+
+      // First open: auto-send review prompt
+      if (data.isNew && data.reviewPrompt) {
+        setTimeout(() => { handleSend(data.reviewPrompt); }, 300);
+      } else if (data.isNew && slug === 'deep-clean') {
+        setTimeout(() => {
+          handleSend(
+            '請幫我分析目前的磁碟使用狀況：\n' +
+            '1. df -h / 整體使用\n' +
+            '2. du -sh /* 2>/dev/null | sort -rh | head -15 (top 目錄)\n' +
+            '3. find / -xdev -size +100M -type f 2>/dev/null (大檔案)\n' +
+            '4. docker system df (Docker 使用)\n' +
+            '5. 根據分析給出清理建議和預估可釋放空間'
+          );
+        }, 300);
+      }
+    } catch (err) {
+      console.error('Project open failed:', err);
+    }
+  };
+
+  // Create new project
+  const handleNewProject = () => {
+    setShowNewProjectInput(true);
+    setNewProjectName('');
+  };
+
+  const handleNewProjectSubmit = async () => {
+    const name = newProjectName.trim();
+    if (!name) return;
+    try {
+      const res = await fetch(`${API_BASE}/projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || 'Failed to create project');
+        return;
+      }
+      const data = await res.json();
+      setShowNewProjectInput(false);
+      setNewProjectName('');
+      await handleProjectOpen(data.slug);
+    } catch (err) {
+      console.error('Create project failed:', err);
+    }
+  };
+
   // Handle command palette selection
   const handleCommandSelect = (item) => {
     if (item.category === 'session' || item.category === 'agent') {
-      // Session commands and agents — send directly
       handleSend(item.name);
       setShowPalette(false);
     } else if (item.category === 'skill') {
-      // Skills — insert into input box for multi-selection
       setSelectedCommand(item);
-      // Keep palette open for multiple selections
-      // User can close with Esc or click outside
     } else if (item.category === 'mcp') {
-      // For MCP tools, insert a template prompt and close
       handleSend(`Use the ${item.name} MCP tool to `);
       setShowPalette(false);
     }
   };
 
-  // Handle compact (using backend API)
+  // Handle compact
   const handleCompact = async () => {
     if (!activeSessionId) return;
-
     try {
-      const res = await fetch(`${API_BASE}/sessions/${activeSessionId}/compact`, {
-        method: 'POST'
-      });
-
+      const res = await fetch(`${API_BASE}/sessions/${activeSessionId}/compact`, { method: 'POST' });
       if (!res.ok) throw new Error('Compact failed');
-
       const data = await res.json();
-
-      // Add system message with compact result
-      const systemMsg = {
+      setMessages(prev => [...prev, {
         role: 'assistant',
-        content: data.message || '✅ Context compacted successfully',
+        content: data.message || '\u2705 Context compacted successfully',
         timestamp: new Date().toISOString()
-      };
-      setMessages(prev => [...prev, systemMsg]);
-
-      // Refresh context after compact
+      }]);
       await fetchContextUsage();
     } catch (err) {
       console.error('[Compact] Failed:', err);
-      const errorMsg = {
+      setMessages(prev => [...prev, {
         role: 'assistant',
-        content: '❌ Failed to compact context. Please try again.',
+        content: '\u274C Failed to compact context. Please try again.',
         timestamp: new Date().toISOString()
-      };
-      setMessages(prev => [...prev, errorMsg]);
+      }]);
     }
   };
 
   // Handle mode change
   const handleModeChange = (newMode) => {
     setMode(newMode);
-    // Add system message to notify mode change
     const modeLabels = { ask: 'Ask Mode', plan: 'Plan Mode', bypass: 'Bypass Mode' };
-    const systemMsg = {
+    setMessages(prev => [...prev, {
       role: 'assistant',
-      content: `🔄 Switched to ${modeLabels[newMode]}`,
+      content: `\uD83D\uDD04 Switched to ${modeLabels[newMode]}`,
       timestamp: new Date().toISOString()
-    };
-    setMessages(prev => [...prev, systemMsg]);
+    }]);
   };
 
-  // Auto-compact when context usage >= 90% (with dedup guard)
+  // Auto-compact when context usage >= 90%
   useEffect(() => {
     if (contextUsage >= 90 && activeSessionId && !isStreaming && !autoCompactingRef.current) {
       autoCompactingRef.current = true;
-      console.log(`[Auto-Compact] Context usage ${contextUsage}% >= 90%, triggering auto-compact...`);
       handleCompact().finally(() => {
-        // Cooldown: prevent re-trigger for 60s
         setTimeout(() => { autoCompactingRef.current = false; }, 60000);
       });
     }
   }, [contextUsage, activeSessionId, isStreaming]);
 
-  // Fetch context usage from API
+  // Fetch context usage
   const fetchContextUsage = useCallback(async () => {
     if (!activeSessionId) return;
-
     try {
       const res = await fetch(`${API_BASE}/sessions/${activeSessionId}/context`);
       if (!res.ok) throw new Error('Failed to fetch context');
-
       const data = await res.json();
       setContextUsage(data.percentage || 0);
       setContextTokens({ used: data.used || 0, total: data.total || 200000 });
     } catch (err) {
       console.error('[Context] Failed to fetch:', err);
-      // Keep existing context usage on error
     }
   }, [activeSessionId]);
 
-  // Fetch context once when switching sessions (cached in backend, no SSH call)
   useEffect(() => {
     if (!activeSessionId) return;
     fetchContextUsage();
@@ -382,7 +464,6 @@ function ChatPage() {
 
   return (
     <div className="flex h-[calc(100dvh-5.5rem)] sm:h-[calc(100dvh-7rem)] -mx-2 sm:-mx-4 md:-mx-6 -mb-20 sm:-mb-4 md:-mb-6 bg-slate-900 rounded-none sm:rounded-lg overflow-hidden border-0 sm:border border-slate-700">
-      {/* Session Drawer */}
       <SessionDrawer
         open={drawerOpen}
         sessions={sessions}
@@ -391,9 +472,11 @@ function ChatPage() {
         onNew={() => setShowNewModal(true)}
         onClose={() => setDrawerOpen(false)}
         onDelete={handleDeleteSession}
+        projects={projects}
+        onProjectOpen={handleProjectOpen}
+        onNewProject={handleNewProject}
       />
 
-      {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0 relative">
         <ChatHeader
           session={activeSession}
@@ -414,8 +497,15 @@ function ChatPage() {
             <MessageList
               messages={messages}
               streamingText={isStreaming ? streamingText : null}
+              toolSteps={isStreaming ? toolSteps : []}
               onRefresh={fetchContextUsage}
             />
+            {activeSession?.type === 'deep-clean' && (
+              <QuickActionPanel
+                onAction={(prompt) => handleSend(prompt)}
+                disabled={isStreaming}
+              />
+            )}
             <MessageInput
               onSend={handleSend}
               disabled={!activeSessionId || isStreaming}
@@ -440,7 +530,6 @@ function ChatPage() {
         )}
       </div>
 
-      {/* New Session Modal */}
       {showNewModal && (
         <NewSessionModal
           onClose={() => setShowNewModal(false)}
@@ -448,7 +537,38 @@ function ChatPage() {
         />
       )}
 
-      {/* Command Palette */}
+      {showNewProjectInput && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" onClick={() => setShowNewProjectInput(false)}>
+          <div className="bg-slate-800 border border-slate-700 rounded-lg p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold mb-4">New Project</h3>
+            <input
+              type="text"
+              value={newProjectName}
+              onChange={e => setNewProjectName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleNewProjectSubmit(); if (e.key === 'Escape') setShowNewProjectInput(false); }}
+              placeholder="Project name..."
+              className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 mb-4"
+              autoFocus
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowNewProjectInput(false)}
+                className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleNewProjectSubmit}
+                disabled={!newProjectName.trim()}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <CommandPalette
         isOpen={showPalette}
         onClose={() => setShowPalette(false)}
