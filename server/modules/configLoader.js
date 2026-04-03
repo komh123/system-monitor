@@ -12,20 +12,60 @@ import path from 'path';
 
 const CLAUDE_DIR = '/home/ubuntu/.claude';
 const RULES_DIR = path.join(CLAUDE_DIR, 'rules');
+const PROJECTS_BASE_DIR = '/home/ubuntu';
 
-// Project root directories — extensible registry
-const PROJECT_ROOTS = {
+// Known project root directories (can be extended dynamically)
+const KNOWN_PROJECT_ROOTS = {
   'agent-skill': '/home/ubuntu/agent-skill',
   'richs': '/home/ubuntu/agent-skill/ai-investment-platform',
   'neuropack': '/home/ubuntu/agent-skill/NeuroPack',
 };
 
-// Per-project memory directories
-const PROJECT_MEMORY_DIRS = {
-  'agent-skill': '/home/ubuntu/.claude/projects/-home-ubuntu-agent-skill/memory',
-  'richs': '/home/ubuntu/.claude/projects/-home-ubuntu-agent-skill-ai-investment-platform/memory',
-  'neuropack': '/home/ubuntu/.claude/projects/-home-ubuntu-agent-skill-NeuroPack/memory',
-};
+/**
+ * Auto-discover project root from session type.
+ * Searches common locations for project directories.
+ */
+function findProjectRoot(projectSlug) {
+  // Check known projects first
+  if (KNOWN_PROJECT_ROOTS[projectSlug]) {
+    return KNOWN_PROJECT_ROOTS[projectSlug];
+  }
+
+  // Handle paths with slashes (e.g., "agent-skill/NeuroPack")
+  if (projectSlug.includes('/')) {
+    const fullPath = path.join(PROJECTS_BASE_DIR, projectSlug);
+    if (existsSync(fullPath)) return fullPath;
+  }
+
+  // Auto-discover: try common patterns
+  const possiblePaths = [
+    path.join(PROJECTS_BASE_DIR, projectSlug),
+    path.join(PROJECTS_BASE_DIR, 'agent-skill', projectSlug),
+    path.join(PROJECTS_BASE_DIR, projectSlug + '-project'),
+  ];
+
+  for (const p of possiblePaths) {
+    if (existsSync(p)) return p;
+  }
+
+  // Fallback to agent-skill
+  return KNOWN_PROJECT_ROOTS['agent-skill'];
+}
+
+/**
+ * Auto-discover project memory directory from project root path.
+ * Uses Claude's standard memory directory naming convention.
+ */
+function findProjectMemoryDir(projectRoot) {
+  if (!projectRoot) return null;
+
+  // Convert project root to Claude memory dir format
+  // e.g., /home/ubuntu/agent-skill → -home-ubuntu-agent-skill
+  const memorySlug = projectRoot.replace(/\//g, '-');
+  const memDir = path.join(CLAUDE_DIR, 'projects', memorySlug, 'memory');
+
+  return existsSync(memDir) ? memDir : null;
+}
 
 /**
  * Read a file safely, return empty string if missing
@@ -71,11 +111,11 @@ function loadProjectClaudeMd(projectRoot) {
 }
 
 /**
- * Read memory files (MEMORY.md + instincts.md) from project memory dir
+ * Read memory files (MEMORY.md + instincts.md) from project root path
  */
-function loadProjectMemory(projectKey) {
-  const memDir = PROJECT_MEMORY_DIRS[projectKey];
-  if (!memDir || !existsSync(memDir)) return '';
+function loadProjectMemory(projectRoot) {
+  const memDir = findProjectMemoryDir(projectRoot);
+  if (!memDir) return '';
 
   const parts = [];
   const memory = safeRead(path.join(memDir, 'MEMORY.md'));
@@ -88,15 +128,13 @@ function loadProjectMemory(projectKey) {
 }
 
 /**
- * Detect which project a session type belongs to
+ * Extract project slug from session type
  */
-function detectProject(sessionType) {
+function extractProjectSlug(sessionType) {
   if (!sessionType) return 'agent-skill';
   if (sessionType === 'deep-clean') return 'agent-skill';
   if (sessionType.startsWith('project-')) {
-    const slug = sessionType.replace('project-', '');
-    if (slug === 'richs' || slug.includes('investment')) return 'richs';
-    if (slug === 'neuropack' || slug.includes('neuro')) return 'neuropack';
+    return sessionType.replace('project-', '');
   }
   return 'agent-skill';
 }
@@ -115,8 +153,8 @@ function detectProject(sessionType) {
  * @returns {string} Composed system prompt
  */
 export function buildSystemPrompt({ sessionType, customPrompt } = {}) {
-  const projectKey = detectProject(sessionType);
-  const projectRoot = PROJECT_ROOTS[projectKey];
+  const projectSlug = extractProjectSlug(sessionType);
+  const projectRoot = findProjectRoot(projectSlug);
   const sections = [];
 
   // 1. Base agentic behavior
@@ -170,19 +208,62 @@ export function buildSystemPrompt({ sessionType, customPrompt } = {}) {
  * Get the working directory for a project
  */
 export function getProjectCwd(sessionType) {
-  const projectKey = detectProject(sessionType);
-  return PROJECT_ROOTS[projectKey] || '/home/ubuntu/agent-skill';
+  const projectSlug = extractProjectSlug(sessionType);
+  return findProjectRoot(projectSlug);
 }
 
 /**
- * List available project keys and their roots
+ * List available project keys and their roots.
+ * Includes both known projects and auto-discovered projects from memory dirs.
  */
 export function listProjects() {
-  return Object.entries(PROJECT_ROOTS).map(([key, root]) => ({
-    key,
-    root,
-    hasClaudeMd: existsSync(path.join(root, 'CLAUDE.md')),
-    hasMemory: existsSync(PROJECT_MEMORY_DIRS[key] || ''),
-    rulesCount: loadGlobalRules().length,
-  }));
+  const projects = [];
+  const seen = new Set();
+
+  // Add known projects
+  for (const [key, root] of Object.entries(KNOWN_PROJECT_ROOTS)) {
+    const memDir = findProjectMemoryDir(root);
+    projects.push({
+      key,
+      root,
+      hasClaudeMd: existsSync(path.join(root, 'CLAUDE.md')),
+      hasMemory: !!memDir,
+      rulesCount: loadGlobalRules().length,
+    });
+    seen.add(key);
+  }
+
+  // Auto-discover projects from memory dirs
+  try {
+    const projectsDir = path.join(CLAUDE_DIR, 'projects');
+    if (existsSync(projectsDir)) {
+      const memoryDirs = readdirSync(projectsDir);
+      for (const dirName of memoryDirs) {
+        const memDir = path.join(projectsDir, dirName, 'memory');
+        if (!existsSync(memDir)) continue;
+
+        // Convert memory dir name to project slug
+        // Standard format: -home-ubuntu-path-to-project
+        // Extract everything after /home/ubuntu/
+        const match = dirName.match(/-home-ubuntu-(.+)$/);
+        if (!match) continue;
+
+        const slug = match[1]; // e.g., "agent-skill" or "ai-investment-platform"
+        if (seen.has(slug)) continue; // Skip if already listed
+
+        const projectRoot = findProjectRoot(slug);
+        projects.push({
+          key: slug,
+          root: projectRoot,
+          hasClaudeMd: existsSync(path.join(projectRoot, 'CLAUDE.md')),
+          hasMemory: true,
+          rulesCount: loadGlobalRules().length,
+          discovered: true, // Flag for auto-discovered projects
+        });
+        seen.add(slug);
+      }
+    }
+  } catch { /* ignore discovery errors */ }
+
+  return projects;
 }
