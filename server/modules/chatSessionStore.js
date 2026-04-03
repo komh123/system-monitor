@@ -34,7 +34,7 @@ class ChatSessionStore {
     }
   }
 
-  create({ serverIp, model, sessionName, allowedTools, systemPrompt }) {
+  create({ serverIp, model, sessionName, allowedTools, systemPrompt, type }) {
     const id = randomUUID();
     const session = {
       id,
@@ -43,6 +43,7 @@ class ChatSessionStore {
       model: model || 'sonnet',
       allowedTools: allowedTools || ['Read', 'Edit', 'Bash', 'Write'],
       systemPrompt: systemPrompt || null,
+      type: type || 'general',
       status: 'starting',
       claudeSessionId: null,
       pid: null,
