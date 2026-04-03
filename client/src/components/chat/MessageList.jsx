@@ -1,22 +1,100 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import MessageBubble from './MessageBubble.jsx';
+import ToolCard from './ToolCard.jsx';
 
-function MessageList({ messages, streamingText, onRefresh }) {
+/**
+ * StreamingBubble — lightweight renderer for streaming text.
+ * Uses raw <pre> whitespace during rapid streaming, switches to
+ * ReactMarkdown only when text hasn't changed for 300ms (pause detection).
+ */
+const StreamingBubble = memo(function StreamingBubble({ text }) {
+  const [renderMarkdown, setRenderMarkdown] = useState(false);
+  const timerRef = useRef(null);
+  const prevTextRef = useRef(text);
+
+  useEffect(() => {
+    // If text changed, reset to raw mode and start a pause timer
+    if (text !== prevTextRef.current) {
+      prevTextRef.current = text;
+      setRenderMarkdown(false);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setRenderMarkdown(true), 300);
+    }
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [text]);
+
+  if (!text) {
+    return (
+      <span className="inline-flex gap-1 text-slate-400">
+        <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
+        <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>
+        <span className="animate-bounce" style={{ animationDelay: '300ms' }}>.</span>
+      </span>
+    );
+  }
+
+  if (!renderMarkdown) {
+    // Fast raw rendering — just whitespace-preserved text
+    return (
+      <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+        {text}
+        <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
+      </div>
+    );
+  }
+
+  // Paused — render full markdown
+  return (
+    <div className="prose-chat">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={streamingMarkdownComponents}
+      >
+        {text}
+      </ReactMarkdown>
+      <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
+    </div>
+  );
+});
+
+// Shared markdown components for streaming view
+const streamingMarkdownComponents = {
+  code({ node, inline, className, children, ...props }) {
+    const match = /language-(\w+)/.exec(className || '');
+    const lang = match ? match[1] : '';
+    const codeString = String(children).replace(/\n$/, '');
+    if (!inline && (lang || codeString.includes('\n'))) {
+      return (
+        <div className="relative my-2">
+          {lang && <div className="text-[10px] text-slate-500 bg-slate-900/50 px-2 py-0.5 rounded-t border-b border-slate-700/50 font-mono">{lang}</div>}
+          <SyntaxHighlighter style={oneDark} language={lang || 'text'} PreTag="div" customStyle={{ margin: 0, borderRadius: lang ? '0 0 0.5rem 0.5rem' : '0.5rem', fontSize: '0.8rem', padding: '0.75rem' }} {...props}>{codeString}</SyntaxHighlighter>
+        </div>
+      );
+    }
+    return <code className="bg-slate-700/60 px-1 py-0.5 rounded text-[0.85em] text-pink-300" {...props}>{children}</code>;
+  },
+  a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">{children}</a>; },
+  p({ children }) { return <p className="my-1">{children}</p>; },
+  ul({ children }) { return <ul className="list-disc list-inside space-y-0.5 my-1">{children}</ul>; },
+  ol({ children }) { return <ol className="list-decimal list-inside space-y-0.5 my-1">{children}</ol>; },
+};
+
+function MessageList({ messages, streamingText, toolSteps = [], onRefresh }) {
   const bottomRef = useRef(null);
   const scrollRef = useRef(null);
-  const [pullState, setPullState] = useState('idle'); // idle | pulling | refreshing
+  const [pullState, setPullState] = useState('idle');
   const [pullDistance, setPullDistance] = useState(0);
   const touchStartY = useRef(0);
   const PULL_THRESHOLD = 60;
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages/tool steps
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingText]);
+  }, [messages, streamingText, toolSteps]);
 
   // Pull-to-refresh touch handlers
   const handleTouchStart = useCallback((e) => {
@@ -32,7 +110,6 @@ function MessageList({ messages, streamingText, onRefresh }) {
 
     const delta = e.touches[0].clientY - touchStartY.current;
     if (delta > 0) {
-      // Dampen the pull distance
       const dampened = Math.min(delta * 0.4, 100);
       setPullDistance(dampened);
       setPullState(dampened >= PULL_THRESHOLD ? 'pulling' : 'idle');
@@ -95,46 +172,29 @@ function MessageList({ messages, streamingText, onRefresh }) {
         <MessageBubble key={i} message={msg} />
       ))}
 
-      {/* Streaming indicator with markdown rendering */}
+      {/* Live tool steps (agentic step-by-step) */}
+      {toolSteps.length > 0 && (
+        <div className="flex justify-start mb-2">
+          <div className="max-w-full w-full sm:max-w-[85%] sm:w-auto sm:mr-auto space-y-1">
+            {toolSteps.map((step, i) => (
+              <ToolCard
+                key={i}
+                tool={step.tool}
+                input={step.input}
+                output={step.output}
+                status={step.status}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Streaming text — optimized with StreamingBubble */}
       {streamingText !== null && (
         <div className="flex justify-start mb-3">
           <div className="max-w-full w-full sm:max-w-[85%] sm:w-auto bg-slate-800 text-slate-200 rounded-2xl rounded-bl-md border border-slate-700 px-3 py-2.5 sm:px-3.5 sm:mr-auto">
             <div className="text-sm break-words overflow-hidden">
-              {streamingText ? (
-                <div className="prose-chat">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      code({ node, inline, className, children, ...props }) {
-                        const match = /language-(\w+)/.exec(className || '');
-                        const lang = match ? match[1] : '';
-                        const codeString = String(children).replace(/\n$/, '');
-                        if (!inline && (lang || codeString.includes('\n'))) {
-                          return (
-                            <div className="relative my-2">
-                              {lang && <div className="text-[10px] text-slate-500 bg-slate-900/50 px-2 py-0.5 rounded-t border-b border-slate-700/50 font-mono">{lang}</div>}
-                              <SyntaxHighlighter style={oneDark} language={lang || 'text'} PreTag="div" customStyle={{ margin: 0, borderRadius: lang ? '0 0 0.5rem 0.5rem' : '0.5rem', fontSize: '0.8rem', padding: '0.75rem' }} {...props}>{codeString}</SyntaxHighlighter>
-                            </div>
-                          );
-                        }
-                        return <code className="bg-slate-700/60 px-1 py-0.5 rounded text-[0.85em] text-pink-300" {...props}>{children}</code>;
-                      },
-                      a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">{children}</a>; },
-                      p({ children }) { return <p className="my-1">{children}</p>; },
-                      ul({ children }) { return <ul className="list-disc list-inside space-y-0.5 my-1">{children}</ul>; },
-                      ol({ children }) { return <ol className="list-decimal list-inside space-y-0.5 my-1">{children}</ol>; },
-                    }}
-                  >
-                    {streamingText}
-                  </ReactMarkdown>
-                </div>
-              ) : (
-                <span className="inline-flex gap-1 text-slate-400">
-                  <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
-                  <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>
-                  <span className="animate-bounce" style={{ animationDelay: '300ms' }}>.</span>
-                </span>
-              )}
+              <StreamingBubble text={streamingText} />
             </div>
           </div>
         </div>

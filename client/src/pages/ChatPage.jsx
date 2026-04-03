@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import ChatHeader from '../components/chat/ChatHeader.jsx';
 import SessionDrawer from '../components/chat/SessionDrawer.jsx';
 import MessageList from '../components/chat/MessageList.jsx';
@@ -9,14 +9,17 @@ import CommandPalette from '../components/chat/CommandPalette.jsx';
 
 const API_BASE = '/api/chat';
 
+/**
+ * Per-session streaming state stored in a ref (not React state).
+ * Each entry: { fullText, toolSteps, contextUsed, contextTotal, reader, abortController }
+ * React state `streamingVersion` is bumped to trigger re-renders.
+ */
+
 function ChatPage() {
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [models, setModels] = useState([]);
-  const [streamingText, setStreamingText] = useState(null);
-  const [toolSteps, setToolSteps] = useState([]);
-  const [isStreaming, setIsStreaming] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
@@ -32,7 +35,45 @@ function ChatPage() {
   const [newProjectName, setNewProjectName] = useState('');
   const autoCompactingRef = useRef(false);
 
+  // Per-session streaming map: sessionId → { fullText, toolSteps, done }
+  const streamMapRef = useRef(new Map());
+  // Bump this counter to re-render when streaming state changes
+  const [streamTick, setStreamTick] = useState(0);
+  // Debounce timer for streaming text updates
+  const flushTimerRef = useRef(null);
+  // Per-session messages cache for background sessions
+  const bgMessagesRef = useRef(new Map());
+
   const activeSession = sessions.find(s => s.id === activeSessionId);
+
+  // Derived: is the ACTIVE session streaming?
+  const activeStreamState = streamMapRef.current.get(activeSessionId);
+  const isStreaming = !!activeStreamState && !activeStreamState.done;
+  const streamingText = isStreaming ? (activeStreamState.fullText || '') : null;
+  const toolSteps = isStreaming ? (activeStreamState.toolSteps || []) : [];
+
+  // How many total sessions are currently streaming (for sidebar indicator)
+  const streamingSessionIds = useMemo(() => {
+    const ids = new Set();
+    for (const [sid, state] of streamMapRef.current) {
+      if (!state.done) ids.add(sid);
+    }
+    return ids;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamTick]);
+
+  // Flush streaming state to React (debounced ~50ms for text, immediate for tools)
+  const flushStream = useCallback((immediate = false) => {
+    if (immediate) {
+      if (flushTimerRef.current) { clearTimeout(flushTimerRef.current); flushTimerRef.current = null; }
+      setStreamTick(t => t + 1);
+    } else if (!flushTimerRef.current) {
+      flushTimerRef.current = setTimeout(() => {
+        flushTimerRef.current = null;
+        setStreamTick(t => t + 1);
+      }, 50);
+    }
+  }, []);
 
   // Fetch sessions
   const fetchSessions = useCallback(async () => {
@@ -138,14 +179,23 @@ function ChatPage() {
     }
   };
 
-  // Send message
+  /**
+   * Send message — supports concurrent sessions.
+   * Each session gets its own streaming state in streamMapRef.
+   * The fetch runs independently; switching sessions won't kill it.
+   */
   const handleSend = async (content, images) => {
-    if (!activeSessionId || isStreaming) return;
+    if (!activeSessionId) return;
+    // Block only if THIS session is already streaming
+    const existingStream = streamMapRef.current.get(activeSessionId);
+    if (existingStream && !existingStream.done) return;
 
     if (content.trim() === '/refresh-skills') {
       await handleRefreshSkills();
       return;
     }
+
+    const targetSessionId = activeSessionId;
 
     const userMsg = {
       role: 'user',
@@ -155,9 +205,17 @@ function ChatPage() {
       imageCount: images?.length || 0
     };
     setMessages(prev => [...prev, userMsg]);
-    setIsStreaming(true);
-    setStreamingText('');
-    setToolSteps([]);
+
+    // Initialize streaming state for this session
+    const abortController = new AbortController();
+    const streamState = {
+      fullText: '',
+      toolSteps: [],
+      done: false,
+      abortController,
+    };
+    streamMapRef.current.set(targetSessionId, streamState);
+    flushStream(true);
 
     let collectedToolSteps = [];
 
@@ -165,10 +223,11 @@ function ChatPage() {
       const body = { content, mode };
       if (images && images.length > 0) body.images = images;
 
-      const res = await fetch(`${API_BASE}/sessions/${activeSessionId}/message`, {
+      const res = await fetch(`${API_BASE}/sessions/${targetSessionId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: abortController.signal,
       });
 
       const reader = res.body.getReader();
@@ -185,6 +244,9 @@ function ChatPage() {
         const lines = buffer.split('\n');
         buffer = lines.pop();
 
+        let textChanged = false;
+        let toolsChanged = false;
+
         for (const line of lines) {
           if (line.startsWith('event: ')) {
             currentEvent = line.substring(7).trim();
@@ -195,7 +257,8 @@ function ChatPage() {
                 case 'assistant_text':
                   if (data.text) {
                     fullText += data.text;
-                    setStreamingText(fullText);
+                    streamState.fullText = fullText;
+                    textChanged = true;
                   }
                   break;
                 case 'tool_use': {
@@ -206,14 +269,16 @@ function ChatPage() {
                     status: 'running'
                   };
                   collectedToolSteps = [...collectedToolSteps, step];
-                  setToolSteps([...collectedToolSteps]);
+                  streamState.toolSteps = [...collectedToolSteps];
+                  toolsChanged = true;
                   break;
                 }
                 case 'tool_progress':
                   if (collectedToolSteps.length > 0 && data) {
                     const last = collectedToolSteps.length - 1;
                     collectedToolSteps[last] = { ...collectedToolSteps[last], progress: data };
-                    setToolSteps([...collectedToolSteps]);
+                    streamState.toolSteps = [...collectedToolSteps];
+                    toolsChanged = true;
                   }
                   break;
                 case 'tool_summary':
@@ -224,19 +289,30 @@ function ChatPage() {
                       output: data.summary || data.output || data.result || data,
                       status: 'complete'
                     };
-                    setToolSteps([...collectedToolSteps]);
+                    streamState.toolSteps = [...collectedToolSteps];
+                    toolsChanged = true;
                   }
                   break;
                 case 'result':
                   if (data.contextUsed !== undefined) {
                     const total = data.contextTotal || 200000;
-                    setContextTokens({ used: data.contextUsed, total });
-                    setContextUsage(Math.round((data.contextUsed / total) * 100));
+                    // Only update context UI if this is the active session
+                    if (targetSessionId === activeSessionId) {
+                      setContextTokens({ used: data.contextUsed, total });
+                      setContextUsage(Math.round((data.contextUsed / total) * 100));
+                    }
                   }
                   break;
               }
             } catch { /* ignore parse errors */ }
           }
+        }
+
+        // Debounced flush for text, immediate for tool changes
+        if (toolsChanged) {
+          flushStream(true);
+        } else if (textChanged) {
+          flushStream(false);
         }
       }
 
@@ -244,28 +320,63 @@ function ChatPage() {
         step.status === 'running' ? { ...step, status: 'complete' } : step
       );
 
-      if (fullText || collectedToolSteps.length > 0) {
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: fullText || '',
-          timestamp: new Date().toISOString(),
-          toolUse: collectedToolSteps.length > 0 ? collectedToolSteps : undefined
-        }]);
+      const assistantMsg = (fullText || collectedToolSteps.length > 0) ? {
+        role: 'assistant',
+        content: fullText || '',
+        timestamp: new Date().toISOString(),
+        toolUse: collectedToolSteps.length > 0 ? collectedToolSteps : undefined
+      } : null;
+
+      // If still viewing this session, append to messages directly
+      if (targetSessionId === activeSessionId) {
+        if (assistantMsg) setMessages(prev => [...prev, assistantMsg]);
+      } else {
+        // Background session completed — cache the message for when user switches back
+        if (assistantMsg) {
+          const cached = bgMessagesRef.current.get(targetSessionId) || [];
+          cached.push(assistantMsg);
+          bgMessagesRef.current.set(targetSessionId, cached);
+        }
       }
     } catch (err) {
-      console.error('Send failed:', err);
+      if (err.name !== 'AbortError') {
+        console.error('Send failed:', err);
+      }
     } finally {
-      setStreamingText(null);
-      setToolSteps([]);
-      setIsStreaming(false);
+      // Mark this session's stream as done
+      streamState.done = true;
+      // Clean up after a short delay so UI can see final state
+      setTimeout(() => {
+        streamMapRef.current.delete(targetSessionId);
+        flushStream(true);
+      }, 100);
+      flushStream(true);
       fetchSessions();
       fetchProjects();
     }
   };
 
-  // Stop streaming
+  // When switching sessions, merge any background messages
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const cached = bgMessagesRef.current.get(activeSessionId);
+    if (cached && cached.length > 0) {
+      // Reload full history from server to stay in sync
+      fetch(`${API_BASE}/sessions/${activeSessionId}/history`)
+        .then(r => r.json())
+        .then(d => setMessages(d.messages || []))
+        .catch(() => {});
+      bgMessagesRef.current.delete(activeSessionId);
+    }
+  }, [activeSessionId]);
+
+  // Stop streaming for active session
   const handleStop = async () => {
     if (!activeSessionId) return;
+    const state = streamMapRef.current.get(activeSessionId);
+    if (state?.abortController) {
+      state.abortController.abort();
+    }
     try {
       await fetch(`${API_BASE}/sessions/${activeSessionId}/stop`, { method: 'POST' });
     } catch { /* ignore */ }
@@ -475,6 +586,7 @@ function ChatPage() {
         projects={projects}
         onProjectOpen={handleProjectOpen}
         onNewProject={handleNewProject}
+        streamingSessionIds={streamingSessionIds}
       />
 
       <div className="flex-1 flex flex-col min-w-0 relative">
@@ -496,8 +608,8 @@ function ChatPage() {
           <>
             <MessageList
               messages={messages}
-              streamingText={isStreaming ? streamingText : null}
-              toolSteps={isStreaming ? toolSteps : []}
+              streamingText={streamingText}
+              toolSteps={toolSteps}
               onRefresh={fetchContextUsage}
             />
             {activeSession?.type === 'deep-clean' && (

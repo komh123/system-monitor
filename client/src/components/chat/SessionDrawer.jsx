@@ -6,7 +6,7 @@ const MODEL_BADGES = {
   haiku: 'bg-green-500/20 text-green-400'
 };
 
-function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onDelete, projects, onProjectOpen, onNewProject }) {
+function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onDelete, projects, onProjectOpen, onNewProject, streamingSessionIds = new Set() }) {
   // Collapsed state (desktop only) - saved to localStorage
   const [collapsed, setCollapsed] = useState(() => {
     const saved = localStorage.getItem('sessionDrawerCollapsed');
@@ -26,6 +26,12 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
   const regularSessions = sessions.filter(s =>
     s.type !== 'deep-clean' && !s.type?.startsWith('project-')
   );
+
+  // Check if a session is streaming (by session id)
+  const isSessionStreaming = (sessionId) => streamingSessionIds.has(sessionId);
+
+  // Check if a project is streaming (by looking up its sessionId)
+  const isProjectStreaming = (proj) => proj.sessionId && streamingSessionIds.has(proj.sessionId);
 
   return (
     <>
@@ -75,34 +81,65 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
                 {collapsed ? '\uD83D\uDCED' : 'No sessions yet'}
               </div>
             ) : (
-              regularSessions.map(s => (
-                <div
-                  key={s.id}
-                  className={`w-full border-b border-slate-700/50 transition-colors ${
-                    s.id === activeId ? 'bg-slate-700/50' : ''
-                  }`}
-                >
-                  <div className="flex items-stretch">
-                    <button
-                      onClick={() => { onSelect(s.id); onClose(); }}
-                      className={`flex-1 text-left transition-colors btn-inline ${
-                        collapsed ? 'sm:px-2 sm:py-3 sm:justify-center' : 'px-3 py-3'
-                      } ${
-                        s.id === activeId
-                          ? ''
-                          : 'hover:bg-slate-700/30 active:bg-slate-700/50'
-                      }`}
-                      title={collapsed ? s.sessionName : ''}
-                    >
-                      {collapsed ? (
-                        <div className="hidden sm:flex flex-col items-center gap-1">
-                          <span className="text-lg">{s.model === 'opus' || s.model?.startsWith('opus') ? '\uD83D\uDFE3' : s.model === 'haiku' ? '\uD83D\uDFE2' : '\uD83D\uDD35'}</span>
-                          <span className="text-[8px] text-slate-500">{s.messageCount}</span>
-                        </div>
-                      ) : (
-                        <>
+              regularSessions.map(s => {
+                const streaming = isSessionStreaming(s.id);
+                return (
+                  <div
+                    key={s.id}
+                    className={`w-full border-b border-slate-700/50 transition-colors ${
+                      s.id === activeId ? 'bg-slate-700/50' : ''
+                    }`}
+                  >
+                    <div className="flex items-stretch">
+                      <button
+                        onClick={() => { onSelect(s.id); onClose(); }}
+                        className={`flex-1 text-left transition-colors btn-inline ${
+                          collapsed ? 'sm:px-2 sm:py-3 sm:justify-center' : 'px-3 py-3'
+                        } ${
+                          s.id === activeId
+                            ? ''
+                            : 'hover:bg-slate-700/30 active:bg-slate-700/50'
+                        }`}
+                        title={collapsed ? s.sessionName : ''}
+                      >
+                        {collapsed ? (
+                          <div className="hidden sm:flex flex-col items-center gap-1 relative">
+                            <span className="text-lg">{s.model === 'opus' || s.model?.startsWith('opus') ? '\uD83D\uDFE3' : s.model === 'haiku' ? '\uD83D\uDFE2' : '\uD83D\uDD35'}</span>
+                            {streaming && (
+                              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-blue-400 rounded-full animate-pulse" />
+                            )}
+                            <span className="text-[8px] text-slate-500">{s.messageCount}</span>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between mb-1 gap-1">
+                              <span className="text-sm font-medium truncate flex items-center gap-1.5">
+                                {streaming && (
+                                  <span className="inline-block w-2 h-2 bg-blue-400 rounded-full animate-pulse shrink-0" title="Streaming..." />
+                                )}
+                                {s.sessionName}
+                              </span>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES[s.model?.split('[')[0]] || MODEL_BADGES.sonnet}`}>
+                                  {s.model}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-slate-500">
+                              <span>{streaming ? 'Streaming...' : `${s.messageCount} msgs`}</span>
+                              <span>{new Date(s.lastActivity).toLocaleDateString()}</span>
+                            </div>
+                          </>
+                        )}
+                        {/* Mobile view */}
+                        <div className="sm:hidden">
                           <div className="flex items-center justify-between mb-1 gap-1">
-                            <span className="text-sm font-medium truncate">{s.sessionName}</span>
+                            <span className="text-sm font-medium truncate flex items-center gap-1.5">
+                              {streaming && (
+                                <span className="inline-block w-2 h-2 bg-blue-400 rounded-full animate-pulse shrink-0" />
+                              )}
+                              {s.sessionName}
+                            </span>
                             <div className="flex items-center gap-1 shrink-0">
                               <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES[s.model?.split('[')[0]] || MODEL_BADGES.sonnet}`}>
                                 {s.model}
@@ -110,40 +147,25 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
                             </div>
                           </div>
                           <div className="flex items-center justify-between text-xs text-slate-500">
-                            <span>{s.messageCount} msgs</span>
+                            <span>{streaming ? 'Streaming...' : `${s.messageCount} msgs`}</span>
                             <span>{new Date(s.lastActivity).toLocaleDateString()}</span>
                           </div>
-                        </>
-                      )}
-                      {/* Mobile view */}
-                      <div className="sm:hidden">
-                        <div className="flex items-center justify-between mb-1 gap-1">
-                          <span className="text-sm font-medium truncate">{s.sessionName}</span>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${MODEL_BADGES[s.model] || MODEL_BADGES[s.model?.split('[')[0]] || MODEL_BADGES.sonnet}`}>
-                              {s.model}
-                            </span>
-                          </div>
                         </div>
-                        <div className="flex items-center justify-between text-xs text-slate-500">
-                          <span>{s.messageCount} msgs</span>
-                          <span>{new Date(s.lastActivity).toLocaleDateString()}</span>
-                        </div>
-                      </div>
-                    </button>
-                    {onDelete && !collapsed && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onDelete(s.id); }}
-                        className="w-11 flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition-colors"
-                        title="Delete session"
-                        style={{ minHeight: '44px' }}
-                      >
-                        {'\uD83D\uDDD1\uFE0F'}
                       </button>
-                    )}
+                      {onDelete && !collapsed && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onDelete(s.id); }}
+                          className="w-11 flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition-colors"
+                          title="Delete session"
+                          style={{ minHeight: '44px' }}
+                        >
+                          {'\uD83D\uDDD1\uFE0F'}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -173,32 +195,48 @@ function SessionDrawer({ open, sessions, activeId, onSelect, onNew, onClose, onD
               </button>
             )}
 
-            {projects && projects.map(proj => (
-              <button
-                key={proj.slug}
-                onClick={() => onProjectOpen(proj.slug)}
-                className={`w-full transition-colors flex items-center ${
-                  collapsed
-                    ? 'p-3 justify-center'
-                    : 'px-3 py-2 gap-2'
-                } ${
-                  proj.sessionId && proj.sessionId === activeId
-                    ? 'bg-slate-700/50 text-white'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-700/30 active:bg-slate-700/50'
-                }`}
-                title={collapsed ? proj.name : ''}
-              >
-                <span className="text-base">{proj.emoji}</span>
-                {!collapsed && (
-                  <div className="flex-1 flex items-center justify-between min-w-0">
-                    <span className="text-xs font-medium truncate">{proj.name}</span>
-                    {proj.messageCount > 0 && (
-                      <span className="text-[10px] text-slate-500 shrink-0 ml-1">{proj.messageCount}</span>
+            {projects && projects.map(proj => {
+              const projStreaming = isProjectStreaming(proj);
+              return (
+                <button
+                  key={proj.slug}
+                  onClick={() => onProjectOpen(proj.slug)}
+                  className={`w-full transition-colors flex items-center ${
+                    collapsed
+                      ? 'p-3 justify-center'
+                      : 'px-3 py-2 gap-2'
+                  } ${
+                    proj.sessionId && proj.sessionId === activeId
+                      ? 'bg-slate-700/50 text-white'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-700/30 active:bg-slate-700/50'
+                  }`}
+                  title={collapsed ? proj.name : ''}
+                >
+                  <span className="text-base relative">
+                    {proj.emoji}
+                    {projStreaming && collapsed && (
+                      <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-blue-400 rounded-full animate-pulse" />
                     )}
-                  </div>
-                )}
-              </button>
-            ))}
+                  </span>
+                  {!collapsed && (
+                    <div className="flex-1 flex items-center justify-between min-w-0">
+                      <span className="text-xs font-medium truncate flex items-center gap-1.5">
+                        {projStreaming && (
+                          <span className="inline-block w-2 h-2 bg-blue-400 rounded-full animate-pulse shrink-0" title="Streaming..." />
+                        )}
+                        {proj.name}
+                      </span>
+                      {proj.messageCount > 0 && !projStreaming && (
+                        <span className="text-[10px] text-slate-500 shrink-0 ml-1">{proj.messageCount}</span>
+                      )}
+                      {projStreaming && (
+                        <span className="text-[10px] text-blue-400 shrink-0 ml-1">...</span>
+                      )}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           {/* Toggle Button (desktop only) */}

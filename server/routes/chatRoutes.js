@@ -764,6 +764,8 @@ router.post('/sessions/:id/message', async (req, res) => {
 
     emitter.on('data', (event) => {
       res.write(`event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
+      // Flush immediately to prevent proxy/buffer delays
+      if (typeof res.flush === 'function') res.flush();
     });
 
     emitter.on('error', (err) => {
