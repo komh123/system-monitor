@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { getChatSessionStore } from '../modules/chatSessionStore.js';
 import { getClaudeRunner } from '../modules/claudeRunner.js';
 import { getSSHPool } from '../modules/sshPool.js';
+import { listProjects as listConfigProjects } from '../modules/configLoader.js';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -580,6 +581,16 @@ router.get('/projects', (req, res) => {
   }
 
   res.json({ projects });
+});
+
+// GET /api/chat/projects/config — Show config injection status per project
+router.get('/projects/config', (req, res) => {
+  try {
+    const configs = listConfigProjects();
+    res.json({ configs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /api/chat/projects/:slug/open — Open or create a project session

@@ -1,13 +1,7 @@
 import { getSSHPool } from './sshPool.js';
 import { getChatSessionStore } from './chatSessionStore.js';
+import { buildSystemPrompt, getProjectCwd } from './configLoader.js';
 import { EventEmitter } from 'events';
-
-const DEFAULT_SYSTEM_PROMPT = `你是一個 agentic AI 助手。你的工作模式：
-1. 主動行動：收到任務後立即採取行動，不要等待用戶逐步指示。先分析問題，然後使用工具執行。
-2. Web 搜尋：當問題涉及最新資訊、即時數據、新聞、價格、天氣等，主動使用 WebSearch 搜尋網路獲取最新資訊。不要憑記憶回答時效性問題。
-3. 搜尋後總結時，附上來源連結。
-4. 回答使用繁體中文，除非用戶用其他語言提問。
-5. 回答要簡潔、有結構，善用 markdown 格式。`;
 
 /**
  * ClaudeRunner — communicates with sdk-runner process on remote servers
@@ -54,13 +48,17 @@ class ClaudeRunner extends EventEmitter {
     // Build SDK query command
     const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+    // Detect project from session type for config injection
+    const sessionType = session.type || '';
+    const projectCwd = getProjectCwd(sessionType);
+
     const queryCmd = {
       cmd: 'query',
       id: requestId,
       prompt: content,
       options: {
         model: model || 'sonnet',
-        cwd: '/home/ubuntu/agent-skill',
+        cwd: projectCwd,
         permissionMode,
         allowedTools: allowedTools || ['Read', 'Edit', 'Bash', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
       }
@@ -76,9 +74,12 @@ class ClaudeRunner extends EventEmitter {
       queryCmd.options.resume = claudeSessionId;
     }
 
-    // System prompt only on first message
+    // System prompt only on first message — inject rules + CLAUDE.md + memory
     if (!claudeSessionId) {
-      queryCmd.options.systemPrompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
+      queryCmd.options.systemPrompt = systemPrompt || buildSystemPrompt({
+        sessionType,
+        customPrompt: session.customPrompt
+      });
     }
 
     console.log(`[ClaudeRunner] Sending SDK query ${requestId} to ${serverIp} (model=${model}, resume=${!!claudeSessionId})`);
@@ -421,13 +422,16 @@ class ClaudeRunner extends EventEmitter {
       const client = connection.client;
       const requestId = `compact-${Date.now()}`;
 
+      const sessionType = session.type || '';
+      const projectCwd = getProjectCwd(sessionType);
+
       const queryCmd = {
         cmd: 'query',
         id: requestId,
         prompt: '/compact',
         options: {
           model: model || 'sonnet',
-          cwd: '/home/ubuntu/agent-skill',
+          cwd: projectCwd,
           permissionMode: 'bypassPermissions',
           allowedTools: allowedTools || ['Read', 'Edit', 'Bash', 'Write', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
           resume: claudeSessionId,

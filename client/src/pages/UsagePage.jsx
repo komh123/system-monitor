@@ -141,6 +141,7 @@ function UsagePage() {
   const [error, setError] = useState(null);
   const [timeRange, setTimeRange] = useState(24);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const fetchUsage = useCallback(async () => {
     try {
@@ -166,7 +167,15 @@ function UsagePage() {
       setError(e.message);
     } finally {
       setLoading(false);
+      setHistoryLoading(false);
     }
+  }, [timeRange]);
+
+  // When time range changes, show loading indicator on chart
+  const handleTimeRangeChange = useCallback((h) => {
+    if (h === timeRange) return;
+    setHistoryLoading(true);
+    setTimeRange(h);
   }, [timeRange]);
 
   useEffect(() => {
@@ -301,67 +310,99 @@ function UsagePage() {
       </div>
 
       {/* History Chart */}
-      {history.length > 1 && (
-        <div className="bg-slate-800 rounded-xl p-4 sm:p-6 border border-slate-700">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-medium text-slate-300">Usage History</h2>
-            <div className="flex gap-1">
-              {[6, 12, 24, 48, 168].map(h => (
-                <button
-                  key={h}
-                  onClick={() => setTimeRange(h)}
-                  className={`px-2 py-1 text-xs rounded transition-colors ${
-                    timeRange === h
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-                  }`}
-                >
-                  {h <= 24 ? `${h}h` : `${h / 24}d`}
-                </button>
-              ))}
+      {history.length > 1 && (() => {
+        // Calculate actual data span for informational display
+        const oldestTs = history.length > 0 ? new Date(history[0].timestamp) : null;
+        const newestTs = history.length > 0 ? new Date(history[history.length - 1].timestamp) : null;
+        const dataSpanHours = oldestTs && newestTs ? Math.round((newestTs - oldestTs) / (1000 * 60 * 60)) : 0;
+
+        return (
+          <div className="bg-slate-800 rounded-xl p-4 sm:p-6 border border-slate-700">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-sm font-medium text-slate-300">Usage History</h2>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {history.length} data points &middot; {dataSpanHours < 1 ? '<1' : dataSpanHours}h of data
+                </p>
+              </div>
+              <div className="flex gap-1">
+                {[6, 12, 24, 48, 168].map(h => (
+                  <button
+                    key={h}
+                    onClick={() => handleTimeRangeChange(h)}
+                    className={`min-w-[40px] min-h-[36px] px-2.5 py-1.5 text-xs rounded-lg font-medium transition-all ${
+                      timeRange === h
+                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 scale-105'
+                        : 'bg-slate-700 text-slate-400 hover:bg-slate-600 active:scale-95'
+                    }`}
+                  >
+                    {h <= 24 ? `${h}h` : `${h / 24}d`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Data range notice */}
+            {timeRange > dataSpanHours && dataSpanHours > 0 && (
+              <div className="mb-3 px-3 py-1.5 bg-slate-700/50 rounded-lg text-[11px] text-slate-400 flex items-center gap-1.5">
+                <span className="shrink-0">ℹ️</span>
+                <span>Showing all available data ({dataSpanHours}h). Monitoring started recently — more data will accumulate over time.</span>
+              </div>
+            )}
+
+            {/* Loading overlay for time range changes */}
+            <div className="relative">
+              {historyLoading && (
+                <div className="absolute inset-0 bg-slate-800/60 z-10 flex items-center justify-center rounded-lg">
+                  <div className="flex items-center gap-2 text-xs text-blue-400">
+                    <div className="animate-spin h-4 w-4 border-2 border-blue-400 border-t-transparent rounded-full" />
+                    Loading...
+                  </div>
+                </div>
+              )}
+              <FullscreenChart title="Usage History" height="h-44 sm:h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={history}>
+                    <defs>
+                      <linearGradient id="colorSession" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorWeekly" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorSonnet" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                    <XAxis
+                      dataKey="timestamp"
+                      tickFormatter={formatHistoryTime}
+                      stroke="#64748b"
+                      fontSize={10}
+                    />
+                    <YAxis
+                      domain={[0, 100]}
+                      stroke="#64748b"
+                      fontSize={10}
+                      width={35}
+                      tickFormatter={v => `${v}%`}
+                    />
+                    <Tooltip content={<ChartTooltip />} />
+                    <ReferenceLine y={80} stroke="#ef4444" strokeDasharray="4 4" label={{ value: '80%', fill: '#ef4444', fontSize: 9 }} />
+                    <Area type="monotone" dataKey="session" name="Session" stroke="#3b82f6" fill="url(#colorSession)" strokeWidth={2} dot={false} />
+                    <Area type="monotone" dataKey="weekly" name="Weekly" stroke="#8b5cf6" fill="url(#colorWeekly)" strokeWidth={2} dot={false} />
+                    <Area type="monotone" dataKey="sonnet" name="Sonnet" stroke="#06b6d4" fill="url(#colorSonnet)" strokeWidth={2} dot={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </FullscreenChart>
             </div>
           </div>
-          <FullscreenChart title="Usage History" height="h-44 sm:h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={history}>
-                <defs>
-                  <linearGradient id="colorSession" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorWeekly" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorSonnet" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis
-                  dataKey="timestamp"
-                  tickFormatter={formatHistoryTime}
-                  stroke="#64748b"
-                  fontSize={10}
-                />
-                <YAxis
-                  domain={[0, 100]}
-                  stroke="#64748b"
-                  fontSize={10}
-                  width={35}
-                  tickFormatter={v => `${v}%`}
-                />
-                <Tooltip content={<ChartTooltip />} />
-                <ReferenceLine y={80} stroke="#ef4444" strokeDasharray="4 4" label={{ value: '80%', fill: '#ef4444', fontSize: 9 }} />
-                <Area type="monotone" dataKey="session" name="Session" stroke="#3b82f6" fill="url(#colorSession)" strokeWidth={2} dot={false} />
-                <Area type="monotone" dataKey="weekly" name="Weekly" stroke="#8b5cf6" fill="url(#colorWeekly)" strokeWidth={2} dot={false} />
-                <Area type="monotone" dataKey="sonnet" name="Sonnet" stroke="#06b6d4" fill="url(#colorSonnet)" strokeWidth={2} dot={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </FullscreenChart>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Extra Usage Info */}
       {usage?.extraUsage?.is_enabled && (

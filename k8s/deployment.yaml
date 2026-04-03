@@ -29,7 +29,7 @@ spec:
           mountPath: /root/.ssh
       containers:
       - name: system-monitor
-        image: localhost:30500/system-monitor:v2.39.0
+        image: localhost:30500/system-monitor:v2.39.2
         imagePullPolicy: Always
         securityContext:
           privileged: true
@@ -102,6 +102,9 @@ spec:
           readOnly: true
         - name: chat-data
           mountPath: /app/server/data
+        - name: agent-skill
+          mountPath: /home/ubuntu/agent-skill
+          readOnly: true
         livenessProbe:
           httpGet:
             path: /health
@@ -146,3 +149,7 @@ spec:
         hostPath:
           path: /home/ubuntu/system-monitor-data
           type: DirectoryOrCreate
+      - name: agent-skill
+        hostPath:
+          path: /home/ubuntu/agent-skill
+          type: Directory
