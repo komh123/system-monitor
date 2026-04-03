@@ -134,14 +134,19 @@ function ChatPage() {
     fetchProjects();
   }, [fetchSessions, fetchProjects]);
 
-  // Load messages when active session changes
+  // Load messages when active session changes + auto-set mode for projects
   useEffect(() => {
     if (!activeSessionId) { setMessages([]); return; }
     fetch(`${API_BASE}/sessions/${activeSessionId}/history`)
       .then(r => r.json())
       .then(d => setMessages(d.messages || []))
       .catch(() => setMessages([]));
-  }, [activeSessionId]);
+    // Auto-set bypass mode for project/deep-clean sessions
+    const session = sessions.find(s => s.id === activeSessionId);
+    if (session?.type && (session.type.startsWith('project-') || session.type === 'deep-clean')) {
+      setMode('bypass');
+    }
+  }, [activeSessionId, sessions]);
 
   // Global keyboard shortcut: Cmd+K
   useEffect(() => {
@@ -438,6 +443,7 @@ function ChatPage() {
       await fetchSessions();
       await fetchProjects();
       setActiveSessionId(data.id);
+      setMode('bypass'); // Projects default to bypass mode
       setDrawerOpen(false);
 
       // First open: auto-send review prompt
@@ -525,15 +531,17 @@ function ChatPage() {
     }
   };
 
-  // Handle mode change
+  // Handle mode change — skip system message during streaming to avoid disrupting display
   const handleModeChange = (newMode) => {
     setMode(newMode);
-    const modeLabels = { ask: 'Ask Mode', plan: 'Plan Mode', bypass: 'Bypass Mode' };
-    setMessages(prev => [...prev, {
-      role: 'assistant',
-      content: `\uD83D\uDD04 Switched to ${modeLabels[newMode]}`,
-      timestamp: new Date().toISOString()
-    }]);
+    if (!isStreaming) {
+      const modeLabels = { ask: 'Ask Mode', plan: 'Plan Mode', bypass: 'Bypass Mode' };
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `\uD83D\uDD04 Switched to ${modeLabels[newMode]}`,
+        timestamp: new Date().toISOString()
+      }]);
+    }
   };
 
   // Auto-compact when context usage >= 90%

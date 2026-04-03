@@ -57,12 +57,12 @@ function ToolCard({ tool, input, output, status }) {
 
       {/* Expanded content */}
       {expanded && (
-        <div className="border-t border-slate-700 max-h-56 overflow-y-auto">
+        <div className="border-t border-slate-700 max-h-[50vh] sm:max-h-80 overflow-y-auto">
           {/* Input details */}
           {input && Object.keys(input).length > 0 && (
             <div className="px-3 py-1.5 bg-slate-900/30">
               <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">Input</div>
-              <pre className="text-[11px] sm:text-xs text-slate-400 font-mono whitespace-pre-wrap break-all">
+              <pre className="text-[11px] sm:text-xs text-slate-400 font-mono whitespace-pre-wrap break-words overflow-x-auto">
                 {typeof input === 'string' ? input : JSON.stringify(input, null, 2)}
               </pre>
             </div>
@@ -71,7 +71,7 @@ function ToolCard({ tool, input, output, status }) {
           {output && (
             <div className="px-3 py-1.5 bg-slate-900/50 border-t border-slate-700/50">
               <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">Output</div>
-              <pre className="text-[11px] sm:text-xs text-slate-400 font-mono whitespace-pre-wrap break-all">
+              <pre className="text-[11px] sm:text-xs text-slate-400 font-mono whitespace-pre-wrap break-words overflow-x-auto">
                 {typeof output === 'string' ? output : JSON.stringify(output, null, 2)}
               </pre>
             </div>

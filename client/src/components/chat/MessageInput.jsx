@@ -233,7 +233,7 @@ function MessageInput({ onSend, disabled, onStop, isStreaming, onOpenPalette, co
 
   return (
     <div
-      className="flex-shrink-0 bg-slate-900 border-t border-slate-700 safe-area-bottom z-10"
+      className="flex-shrink-0 bg-slate-900 border-t border-slate-700 safe-area-bottom z-10 relative"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
